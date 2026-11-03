@@ -51,7 +51,7 @@ const sy = (y) => baseY + (y - PY) * scale;
 
 // ---------- boards, ghosts, flow ----------
 
-const crewRuns = () => runsFor(store, seed).map((r) => ({ xs: decodeXs(r.x), score: r.s }));
+const crewRuns = () => runsFor(store, seed).flatMap((r) => { try { return [{ xs: decodeXs(r.x), score: r.s }]; } catch { return []; } });
 const ghostsNow = () => pickGhosts(crewRuns());
 const bestScore = () => store.boards?.[seed]?.best?.s ?? 0;
 
@@ -62,11 +62,13 @@ function setBoard(newSeed) {
 }
 
 function showReady() {
+  if (isDaily(seed) && seed !== dailySeed()) { seed = dailySeed(); track = makeTrack(seed); store.seed = seed; saveStore(store); } // the day rolled over
   state = 'ready'; run = null; ghosts = ghostsNow();
+  $('over-daily').hidden = isDaily(seed);
   $('start').hidden = false; $('over').hidden = true;
   $('hud').hidden = false; $('legend').hidden = false; $('caption').hidden = true; $('skip').hidden = true;
   const n = ghosts.length;
-  $('start-hint').textContent = n === 0 ? 'Touch anywhere to start.' : 'The crew will find you about 10 seconds in. Touch anywhere to start.';
+  $('start-hint').textContent = n === 0 ? 'Touch anywhere to start.' : 'The crew will find you 10 to 15 seconds in. Touch anywhere to start.';
   const best = bestScore();
   $('board').textContent = `${boardLabel(seed)}${best ? ` · best ${best}` : ''}`;
   $('score').textContent = '0'; $('status').textContent = '';
@@ -124,7 +126,7 @@ async function postAndRank(res, token) {
 }
 
 function showOver() {
-  state = 'over'; ghosts = ghostsNow(); renderLegend();
+  state = 'over'; $('over-daily').hidden = isDaily(seed); ghosts = ghostsNow(); renderLegend();
   $('over').hidden = false; overAt = clock + 0.35; // brief lock so a panicked tap does not skip the result
 }
 
@@ -156,7 +158,7 @@ const pointerX = (e) => { const r = stage.getBoundingClientRect(); return Math.m
 const sheetOpen = () => !$('sheet-board').hidden || !$('sheet-guide').hidden;
 
 stage.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('button') || sheetOpen()) return;
+  if (e.target.closest('button, .sheet') || sheetOpen()) return; // a tap on a sheet (even its backdrop) never starts a run
   const x = pointerX(e);
   if (state === 'intro') { introPoke(); return; }
   if (state === 'ready') startRun(x);
@@ -169,8 +171,9 @@ stage.addEventListener('pointermove', (e) => { if (state === 'playing' && e.butt
 const keys = new Set();
 const begin = () => { if (sheetOpen()) return; if (state === 'ready') startRun(0.5); else if (state === 'over' && clock >= overAt) startRun(0.5); else if (state === 'intro') introPoke(); };
 addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowLeft' || e.key === 'a') keys.add('l');
-  else if (e.key === 'ArrowRight' || e.key === 'd') keys.add('r');
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === 'ArrowLeft' || k === 'a') keys.add('l');
+  else if (k === 'ArrowRight' || k === 'd') keys.add('r');
   else if (e.key === ' ' || e.key === 'Enter') { if (e.target.closest?.('button')) return; begin(); e.preventDefault(); return; }
   else if (e.key === 'Escape') { closeSheets(); return; }
   else return;
@@ -178,12 +181,16 @@ addEventListener('keydown', (e) => {
   keyDir = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
 });
 addEventListener('keyup', (e) => {
-  if (e.key === 'ArrowLeft' || e.key === 'a') keys.delete('l');
-  if (e.key === 'ArrowRight' || e.key === 'd') keys.delete('r');
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === 'ArrowLeft' || k === 'a') keys.delete('l');
+  if (k === 'ArrowRight' || k === 'd') keys.delete('r');
   keyDir = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
 });
+const releaseKeys = () => { keys.clear(); keyDir = 0; };
+addEventListener('blur', releaseKeys);
+document.addEventListener('visibilitychange', releaseKeys);
 
-$('again').addEventListener('click', () => { if (clock >= overAt) startRun(0.5); });
+$('again').addEventListener('click', () => { if (state === 'over' && clock >= overAt) startRun(0.5); });
 $('skip').addEventListener('click', () => { if (state === 'intro') endIntro(); });
 $('start-intro').addEventListener('click', startIntro);
 const newBoard = () => setBoard(1 + Math.floor(Math.random() * 999999));
@@ -240,7 +247,8 @@ async function renderBoard() {
   };
   for (const e of out.rows) add(e, `#${e.rank}`);
   if (out.mine && !out.rows.some((e) => e.uid === out.mine.uid)) add(out.mine, '…');
-  $('board-status').textContent = !out.rows.length ? 'No scores yet. Be the first.' : !board.canWrite ? 'View only. Ask the owner for Contributor access to post scores.' : '';
+  const viewOnly = 'View only. Ask the owner for Contributor access to post scores.';
+  $('board-status').textContent = !out.rows.length ? (board.canWrite ? 'No scores yet. Be the first.' : `No scores yet. ${viewOnly}`) : !board.canWrite ? viewOnly : '';
 }
 
 // A short field guide, drawn with the same art as the game.
@@ -258,7 +266,7 @@ function buildGuide() {
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
   guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15, then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. A touch costs a suit cell, then you get a safe moment.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
-  guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Aliens', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
+  guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Alien snails', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
   guideRow(aliens, shot('hammer'), 'Hammer', 'Thrown straight at where you were.');
   guideRow(aliens, shot('jack'), 'Jacks', 'A fan of three slow spinning jacks. Slip between them.');
@@ -470,7 +478,7 @@ function frame(ts) {
     if (introT >= INTRO_LENGTH) endIntro();
   } else {
     if (state === 'playing') {
-      acc += dt;
+      if (sheetOpen()) acc = 0; else acc += dt; // reading the guide pauses the run
       while (acc >= TICK && run.alive) {
         if (keyDir) target = Math.min(1, Math.max(0, target + keyDir * 1.6 * TICK));
         handleEvents(step(run, target));

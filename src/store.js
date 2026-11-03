@@ -4,10 +4,33 @@ const KEEP = 8; // latest runs kept per board, plus the best
 
 let memory = null;
 
+// Whatever is in storage might be damaged or from an older version, so rebuild a clean store from it.
+export function sanitizeStore(raw) {
+  const out = { boards: {} };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  if (typeof raw.handle === 'string') out.handle = raw.handle.slice(0, 40);
+  if (Number.isInteger(raw.seed)) out.seed = raw.seed;
+  if (typeof raw.sound === 'boolean') out.sound = raw.sound;
+  if (typeof raw.introSeen === 'boolean') out.introSeen = raw.introSeen;
+  const run = (r) => {
+    if (!r || typeof r !== 'object' || !Number.isFinite(r.s) || typeof r.x !== 'string' || !r.x || r.x.length > 200000) return null;
+    try { if (atob(r.x).length % 2) return null; } catch { return null; }
+    return { s: r.s, x: r.x, t: Number.isFinite(r.t) ? r.t : 0 };
+  };
+  const boards = raw.boards && typeof raw.boards === 'object' && !Array.isArray(raw.boards) ? raw.boards : {};
+  for (const [k, b] of Object.entries(boards)) {
+    if (!b || typeof b !== 'object') continue;
+    const recent = (Array.isArray(b.recent) ? b.recent : []).map(run).filter(Boolean);
+    const best = run(b.best);
+    if (recent.length || best) out.boards[k] = { recent, best, played: Number.isFinite(b.played) ? b.played : 0 };
+  }
+  return out;
+}
+
 export function loadStore() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return sanitizeStore(JSON.parse(raw));
   } catch { /* storage blocked or corrupt: start fresh */ }
   return memory ?? { boards: {} };
 }
@@ -35,7 +58,7 @@ export function boardLabel(seed) {
 export function runsFor(store, seed) {
   const b = store.boards?.[seed];
   if (!b) return [];
-  const runs = [...b.recent];
+  const runs = [...(Array.isArray(b.recent) ? b.recent : [])];
   if (b.best && !runs.some((r) => r.t === b.best.t)) runs.unshift(b.best);
   return runs;
 }
@@ -43,11 +66,14 @@ export function runsFor(store, seed) {
 export function recordRun(store, seed, run) {
   const boards = { ...(store.boards ?? {}) };
   const b = boards[seed] ?? { recent: [], best: null };
-  const recent = [...b.recent, run].slice(-KEEP);
+  const recent = [...(Array.isArray(b.recent) ? b.recent : []), run].slice(-KEEP);
   const best = !b.best || run.s >= b.best.s ? run : b.best;
-  boards[seed] = { recent, best };
-  // Only remember the few most recently played boards so storage stays small.
+  boards[seed] = { recent, best, played: run.t ?? Date.now() };
+  // Only remember the 12 most recently played boards so storage stays small (oldest play time goes first).
   const keys = Object.keys(boards);
-  if (keys.length > 12) for (const k of keys.slice(0, keys.length - 12)) if (+k !== seed) delete boards[k];
+  if (keys.length > 12) {
+    const oldest = keys.filter((k) => +k !== seed).sort((a, c) => (boards[a].played ?? 0) - (boards[c].played ?? 0));
+    for (const k of oldest.slice(0, keys.length - 12)) delete boards[k];
+  }
   return { ...store, boards };
 }
