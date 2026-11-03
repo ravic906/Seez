@@ -1,0 +1,12 @@
+{
+  "name": "echoes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Echoes: a one-thumb dodger where your past runs come back as ghosts",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "tune": "node scripts/tune.mjs",
+    "start": "node scripts/serve.mjs"
+  }
+}
