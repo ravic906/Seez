@@ -260,7 +260,7 @@ function buildGuide() {
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Aliens', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
-  guideRow(aliens, shot('hammer'), 'Hammer', 'Fast and straight at where you were.');
+  guideRow(aliens, shot('hammer'), 'Hammer', 'Thrown straight at where you were.');
   guideRow(aliens, shot('jack'), 'Jacks', 'A fan of three slow spinning jacks. Slip between them.');
   guideRow(aliens, shot('bomb'), 'Bomb', 'Lands, ticks for half a second, then blasts wide. Leave the circle.');
   for (const kind of Object.keys(POWERS)) {

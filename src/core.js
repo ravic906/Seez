@@ -77,9 +77,9 @@ export const SNAIL_FROM = 4;
 export const FIRE_DIST = 0.8;
 export const TELEGRAPH_DIST = 0.4;
 export const WEAPONS = {
-  hammer: { r: 0.028, vy: 1.7,  weight: 3, from: 4 },    // fast, straight at where you stood
-  jacks:  { r: 0.02,  vy: 0.95, weight: 2, from: 24 },   // a fan of three slow spinning jacks
-  bomb:   { r: 0.03,  vy: 1.0,  weight: 2, from: 36 },   // lands, ticks, then a wide blast
+  hammer: { r: 0.028, vy: 1.2,  weight: 3, from: 4 },    // straight at where you stood
+  jacks:  { r: 0.02,  vy: 0.72, weight: 2, from: 24 },   // a fan of three slow spinning jacks
+  bomb:   { r: 0.03,  vy: 0.8,  weight: 2, from: 36 },   // lands, ticks, then a wide blast
 };
 export const BOMB_FUSE = 30;        // 0.5 s from landing to blast
 export const BLAST_TICKS = 8;

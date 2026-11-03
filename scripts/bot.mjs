@@ -11,7 +11,7 @@ export function shotDanger(run, x) {
   for (const s of run.shots) {
     if (s.kind === 'bomb' && s.mode !== 'fly') { if (Math.abs(x - s.x) < BLAST_R + PR + 0.05) d = 1; continue; }
     const t = (PY - s.y) / s.vy;
-    if (t < -0.1 || t > 1.1) continue;
+    if (t < -0.1 || t > 1.5) continue;
     const cx = s.x + s.vx * Math.max(0, t);
     const reach = (s.kind === 'bomb' ? BLAST_R : s.r) + PR + 0.05;
     if (Math.abs(x - cx) < reach) d = 1;
