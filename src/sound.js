@@ -23,7 +23,43 @@ export function makeSound(enabled) {
     const s = a.createBufferSource(), g = a.createGain();
     s.buffer = buf; g.gain.value = gain; s.connect(g).connect(a.destination); s.start(a.currentTime + delay);
   };
+  // A bed of soft white noise, low-passed so it reads as the hiss of the void, breathing slowly,
+  // with a faint low hum under it. Quiet on purpose: it should be felt more than heard.
+  let amb = null;
+  const AMB_GAIN = 0.032;
+  const ambientOn = () => {
+    if (!enabled() || amb) return;
+    const a = ctx(); if (!a) return;
+    if (a.state === 'suspended') a.resume();
+    const buf = a.createBuffer(2, a.sampleRate * 4, a.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+    const src = a.createBufferSource(); src.buffer = buf; src.loop = true;
+    const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;
+    const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400; lp.Q.value = 0.4;
+    const g = a.createGain(); g.gain.value = 0;
+    const lfo = a.createOscillator(); lfo.frequency.value = 0.07; const lfoG = a.createGain(); lfoG.gain.value = 380;
+    lfo.connect(lfoG).connect(lp.frequency);
+    const hum = a.createOscillator(); hum.type = 'sine'; hum.frequency.value = 52; const humG = a.createGain(); humG.gain.value = 0.35;
+    hum.connect(humG).connect(g);
+    src.connect(hp).connect(lp).connect(g).connect(a.destination);
+    g.gain.setValueAtTime(0, a.currentTime); g.gain.linearRampToValueAtTime(AMB_GAIN, a.currentTime + 2.5);
+    src.start(); lfo.start(); hum.start();
+    amb = { src, lfo, hum, g, lp };
+  };
+  const ambientOff = () => {
+    if (!amb) return;
+    const a = ctx(), { src, lfo, hum, g } = amb;
+    amb = null;
+    g.gain.cancelScheduledValues(a.currentTime); g.gain.setValueAtTime(g.gain.value, a.currentTime); g.gain.linearRampToValueAtTime(0, a.currentTime + 0.4);
+    setTimeout(() => { for (const n of [src, lfo, hum]) { try { n.stop(); } catch { /* already stopped */ } } }, 600);
+  };
+  document.addEventListener('visibilitychange', () => { if (ac) (document.hidden ? ac.suspend() : ac.resume()).catch(() => {}); });
+
   return {
+    ambientOn, ambientOff,
+    // Brighter hiss during Nitro, muffled during Slow-mo.
+    mood(kind) { if (amb) amb.lp.frequency.setTargetAtTime(kind === 'nitro' ? 2600 : kind === 'slowmo' ? 650 : 1400, ac.currentTime, 0.25); },
+    state() { return { ambient: !!amb, context: ac ? ac.state : 'none' }; },
     unlock() { const a = ctx(); if (a?.state === 'suspended') a.resume(); },
     pass() { tone(520, 0.06, 'sine', 0.04); },
     graze() { tone(880, 0.1, 'triangle', 0.06, 440); },

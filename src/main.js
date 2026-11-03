@@ -34,7 +34,7 @@ let overAt = 0, shake = 0, bump = 0, flash = { c: '255,77,94', a: 0 };
 const particles = [], floaters = [];
 const stars = makeStars(11, 150);
 const sound = makeSound(() => store.sound !== false);
-let board = null, boardScope = 'today', runToken = 0;
+let board = null, boardScope = 'today', runToken = 0, lastMood = null;
 
 // ---------- layout ----------
 
@@ -70,7 +70,7 @@ function showReady() {
   const best = bestScore();
   $('board').textContent = `${boardLabel(seed)}${best ? ` · best ${best}` : ''}`;
   $('score').textContent = '0'; $('status').textContent = '';
-  setHearts(HEARTS); setChips(null);
+  setHearts(HEARTS); setChips(null); lastMood = null; sound.mood(null);
   renderLegend();
   $('start-board').hidden = !board; $('over-board').hidden = !board;
 }
@@ -184,8 +184,10 @@ $('over-daily').addEventListener('click', () => setBoard(dailySeed()));
 $('sound').addEventListener('click', () => {
   store.sound = store.sound === false; saveStore(store);
   $('sound').setAttribute('aria-pressed', String(store.sound !== false));
-  if (store.sound !== false) sound.pass();
+  if (store.sound !== false) { sound.ambientOn(); sound.pass(); } else sound.ambientOff();
 });
+// Browsers only allow sound after a touch, so the ambient bed starts on the first one.
+for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { sound.unlock(); sound.ambientOn(); }, { capture: true, passive: true });
 
 // ---------- sheets: leaderboard and field guide ----------
 
@@ -321,7 +323,7 @@ function drawGame(dt) {
   if (shake > 0 && !reduced) ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 10 * shake);
   const D = run ? run.D : 0;
   const pw = run?.power ?? null;
-  drawSpace(ctx, cssW, cssH, stars, D * scale + t * 6, t);
+  drawSpace(ctx, cssW, cssH, stars, D * scale + t * 6, t, seed);
 
   // wreckage plates, with a gap list that Wide gaps stretches
   const widen = pw === 'widen' ? WIDEN_MULT : 1;
@@ -451,6 +453,7 @@ function frame(ts) {
       }
       $('score').textContent = run.score;
       setHearts(run.hearts); setChips(run);
+      if (run.power !== lastMood) { lastMood = run.power; sound.mood(run.power); }
       const wake = run.ghosts.length && run.tick < GRACE ? ((GRACE - run.tick) / 60).toFixed(1) : null;
       $('status').textContent = wake ? `crew wakes in ${wake}s` : run.ghosts.length ? 'crew awake' : '';
       if (!run.alive) endRun();
@@ -482,5 +485,5 @@ connect().then((conn) => {
 
 if (dbg) window.__echoes = {
   get state() { return state; }, get run() { return run; }, get track() { return track; }, get board() { return board; },
-  steer: (x) => { target = x; }, start: (x) => startRun(x), seed: () => seed, skipIntro: () => endIntro(), introAt: (t) => { introT = t; },
+  sound: () => sound.state(), steer: (x) => { target = x; }, start: (x) => startRun(x), seed: () => seed, skipIntro: () => endIntro(), introAt: (t) => { introT = t; },
 };

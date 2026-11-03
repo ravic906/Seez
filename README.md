@@ -12,6 +12,7 @@ The first launch plays a short animated intro (the ship destroyed, the bot's esc
 
 ## Rules
 - **Steer** with your thumb. You follow it at a capped speed, so you can't teleport. Wreckage ends the run at once. Skim a gap edge for a **graze** bonus.
+- **Sound.** A soft filtered white-noise bed (with a faint low hum) plays from your first touch; the speaker button turns it and all effects off. It brightens during Nitro and muffles during Slow-mo.
 - **Boards.** The wreckage is the same every run of a board. The **Daily board** is the same for everyone each day. **New board** is a private practice board with no ghosts.
 - **Crew ghosts.** You keep two: your best run (the captain, gold) and your last run (blue). They wake 2 seconds after you start. A touch costs one of your **3 suit cells**, shatters that ghost for 2.5 s, and gives you 1.5 s of safety. Lose all three and the run ends.
 - **Aliens** (snails) sit on the wreckage from bar 10 on. They shake red before they fire, and every shot is slower than you can slide. **Hammer**: fast, straight at where you stood. **Jacks**: a fan of three. **Bomb**: lands, ticks half a second, then a wide blast. A shot costs a suit cell, like a ghost.
@@ -37,7 +38,7 @@ Limits: the replay check can't tell a flawless bot from a person, and an anonymo
 
 ## Code
 - `src/core.js`: the rules at a fixed 60 Hz. Every position is snapped to a 16-bit grid so a saved run replays exactly (`verifyRun`).
-- `src/art.js`, `src/intro.js`: all drawing (space, wreckage, bot, crew, aliens, shots, the opening scene). Nothing is loaded; it is all vector code.
+- `src/art.js`, `src/intro.js`: all drawing (space, wreckage, bot, crew, aliens, shots, the opening scene). Nothing is loaded; it is all vector code. The backdrop is a stream of scenery along your route (planets of six kinds, moons, comets, asteroid fields, nebulae, galaxies, pulsars, binary stars, a derelict station), each at its own depth so it drifts past at its own speed, and different on every board.
 - `src/main.js`: screens, controls, hearts and chips, field guide, leaderboard sheet.
 - `src/board.js`, `src/leaderboard.js`: leaderboard logic and the database glue.
 - `src/store.js`, `src/names.js`, `src/sound.js`: saved runs, callsigns, synthesised sounds.
