@@ -24,10 +24,10 @@ The first launch plays a short animated intro (the ship destroyed, the bot's esc
 |---|---|---|
 | 1 | Nitro | 4 s of faster sideways speed and double points |
 | 1 | Shield | absorbs the next hit (8 s) |
-| 1 | Slow-mo | the wreckage falls slower for 4 s |
-| 1 | Wide gaps | gaps grow for 5 s |
-| 1 | Foresight | shows where the crew will be for 6 s |
-| 2 | Exorcise | crew ghosts can't touch you for 5 s |
+| 1 | Slow-mo | the wreckage and the aliens' shots move at half speed for 5 s |
+| 1 | Wide gaps | gaps grow by half for 5 s |
+| 1 | Foresight | for 8 s, shows the safe route through the next bars, where shots will land and where the crew will be |
+| 2 | Exorcise | crew ghosts and alien shots pass through you for 4 s |
 | 2 | Shrink | you get smaller for 6 s |
 | 2 | Gold rush | triple points for 5 s |
 | 3 | Repair | +1 suit cell (5 s of safety if you are full) |

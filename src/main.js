@@ -1,6 +1,6 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, WIDEN_MULT, POWERS, speedAt,
+  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, POWERS, speedAt,
   newRun, step, makeTrack, pickGhosts, ghostX, encodeXs, decodeXs,
 } from './core.js';
 import {
@@ -357,7 +357,8 @@ function drawGame(dt) {
     const h = BAR_T * scale;
     for (const g of b.gaps) {
       const a = Math.max(0, g.c - (g.w * widen) / 2), z = Math.min(1, g.c + (g.w * widen) / 2);
-      drawGirder(ctx, sx(from), sx(a), y, h, t, b.tough); from = z;
+      if (a > from) drawGirder(ctx, sx(from), sx(a), y, h, t, b.tough); // widened gaps can meet: draw no plate between
+      from = Math.max(from, z);
     }
     drawGirder(ctx, sx(from), sx(1), y, h, t, b.tough);
     const sn = track.snail(i);
@@ -381,6 +382,26 @@ function drawGame(dt) {
 
   // alien shots
   if (run) for (const s of run.shots) drawShot(ctx, s, sx(s.x), sy(s.y), scale, t);
+
+  // Foresight: the safe route through the next bars, and where each shot is going to land
+  if (run && pw === 'foresight' && state !== 'over') {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,255,190,0.8)'; ctx.fillStyle = 'rgba(120,255,190,0.25)'; ctx.lineWidth = 2;
+    for (let i = run.next; i < run.next + 4; i++) {
+      const b = track.bar(i), y = sy(D - b.d);
+      if (y < 0) break;
+      ctx.beginPath(); ctx.arc(sx(b.c), y, 8 * k + 3, 0, TAU); ctx.fill(); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,110,110,0.85)'; ctx.setLineDash([4, 4]);
+    for (const s of run.shots) {
+      if (s.kind === 'bomb' && s.mode !== 'fly') continue;
+      const dt = (PY - s.y) / s.vy;
+      if (dt < 0) continue;
+      const lx = s.x + s.vx * dt;
+      ctx.beginPath(); ctx.arc(sx(lx), sy(PY), (s.kind === 'bomb' ? BLAST_R : s.r + PR) * scale, 0, TAU); ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   // the dead crew: your earlier runs
   const tick = run ? run.tick : 1;

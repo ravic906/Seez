@@ -248,7 +248,7 @@ test('only one timed power at a time: a new pickup replaces the old one, but a S
   assert.equal(run.power, 'nitro');
   for (let t = 0; t < 50; t++) step(run, 0.5);
   assert.equal(run.power, 'slowmo', 'replaced');
-  for (let t = 0; t < 60; t++) step(run, 0.5);
+  while (run.nf < 3 && run.tick < 400) step(run, 0.5); // Slow-mo is on, so the last pickup takes longer to arrive
   assert.ok(run.bubble > 0 && run.power === 'slowmo', 'the bubble waits alongside the timed power');
 });
 
@@ -476,7 +476,7 @@ test('on a real board the crew arrive and leave at the scheduled moments', () =>
   const run = newRun(track, [], 0.5);
   run.lenient = true;
   const seen = [];
-  while (run.alive && run.tick < 60 * 80) for (const e of step(run, track.bar(run.next).c)) if (e === 'join' || e === 'leave') seen.push([e, run.tick]);
+  while (run.alive && run.tick < 60 * 80) for (const e of step(run, track.bar(run.next).c)) if (e === 'join' || e === 'leave') seen.push([e, run.pt]); // the schedule runs on how far the wreckage has fallen, so Slow-mo pickups cannot move it
   const expected = track.windows.filter((w) => w.end < 60 * 80).flatMap((w) => [['join', w.start], ['leave', w.end]]);
   assert.ok(run.alive && expected.length >= 3);
   assert.deepEqual(seen.slice(0, expected.length), expected);
@@ -696,4 +696,24 @@ test('the fall speed ramps up over about 23 seconds', () => {
   assert.equal(speedAt(D), 1.2, 'at the top speed after 24 s');
   assert.ok(speedAt(dAfter(60 * 21)) < 1.2, 'not quite there at 21 s');
   assert.ok(speedAt(dAfter(60 * 10)) < 1.0, 'still well short of it after 10 s');
+});
+
+test('Exorcise lets alien shots pass through you as well as ghosts', () => {
+  const ex = withPower(untilFire('hammer', 0.7), 'exorcise', 1000);
+  for (let t = 0; t < 120; t++) step(ex, 0.7);
+  assert.equal(ex.hearts, HEARTS, 'a hammer passes through');
+  const bomb = withPower(untilFire('bomb', 0.7), 'exorcise', 1000);
+  for (let t = 0; t < 200; t++) step(bomb, 0.7);
+  assert.equal(bomb.hearts, HEARTS, 'and so does a bomb blast');
+  const plain = untilFire('hammer', 0.7);
+  for (let t = 0; t < 120; t++) step(plain, 0.7);
+  assert.equal(plain.hearts, HEARTS - 1, 'without it the same shot hits');
+});
+
+test('Slow-mo slows the aliens\' shots down along with the wreckage', () => {
+  const normal = untilFire('hammer', 0.7), slow = withPower(untilFire('hammer', 0.7), 'slowmo', 1000);
+  const y0 = normal.shots[0].y;
+  for (let t = 0; t < 10; t++) { step(normal, 0.7); step(slow, 0.7); }
+  const dN = normal.shots[0].y - y0, dS = slow.shots[0].y - y0;
+  assert.ok(Math.abs(dS / dN - SLOWMO_MULT) < 0.02, `shot moved ${(dS / dN).toFixed(2)} of its normal distance`);
 });

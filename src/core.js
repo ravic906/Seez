@@ -39,9 +39,9 @@ export const SHATTER_TICKS = 150;   // a ghost that hit you cannot hit again for
 
 export const FR = 0.04;             // a friend ghost's pickup radius (generous)
 export const NITRO_MULT = 1.7;      // sideways speed while Nitro lasts; points double too
-export const SLOWMO_MULT = 0.6;     // how fast bars fall during Slow-mo
-export const SHRINK_MULT = 0.6;     // your size during Shrink
-export const WIDEN_MULT = 1.35;     // gap width during Wide gaps
+export const SLOWMO_MULT = 0.5;     // how fast bars AND alien shots move during Slow-mo
+export const SHRINK_MULT = 0.55;     // your size during Shrink
+export const WIDEN_MULT = 1.5;      // gap width during Wide gaps
 export const GOLD_MULT = 3;         // points multiplier during Gold rush
 
 // Friend ghosts leave one of these. Timed powers share a single slot: a new one replaces the old.
@@ -50,14 +50,14 @@ export const GOLD_MULT = 3;         // points multiplier during Gold rush
 // bar TIER_FROM[2], tier 3 from bar TIER_FROM[3], and the higher tiers become more common over time.
 export const POWERS = {
   nitro:     { ticks: 240, weight: 3,   tier: 1 },
-  shield:    { ticks: 0,   weight: 3,   tier: 1 },
-  slowmo:    { ticks: 240, weight: 2,   tier: 1 },
+  shield:    { ticks: 0,   weight: 2.5, tier: 1 },
+  slowmo:    { ticks: 300, weight: 2.5, tier: 1 },
   widen:     { ticks: 300, weight: 2,   tier: 1 },
-  foresight: { ticks: 360, weight: 1.5, tier: 1 },
-  exorcise:  { ticks: 300, weight: 2,   tier: 2 },
+  foresight: { ticks: 480, weight: 1.5, tier: 1 },
+  exorcise:  { ticks: 240, weight: 2,   tier: 2 },
   shrink:    { ticks: 360, weight: 2,   tier: 2 },
   gold:      { ticks: 300, weight: 2,   tier: 2 },
-  heal:      { ticks: 0,   weight: 1.5, tier: 3 },
+  heal:      { ticks: 0,   weight: 1,   tier: 3 },
   phase:     { ticks: 120, weight: 1,   tier: 3 },
 };
 export const TIER_FROM = [0, 0, 18, 36];
@@ -67,7 +67,7 @@ export function powerWeight(kind, bar) {
   const p = POWERS[kind];
   if (bar < TIER_FROM[p.tier]) return 0;
   const progress = Math.min(1, bar / 120);
-  const mult = p.tier === 1 ? 1 - 0.7 * progress : p.tier === 2 ? 0.5 + progress : 0.3 + 2.2 * progress;
+  const mult = p.tier === 1 ? 1 - 0.7 * progress : p.tier === 2 ? 0.5 + progress : 0.3 + 1.7 * progress;
   return p.weight * mult;
 }
 export const NITRO_TICKS = POWERS.nitro.ticks; // 4 s
@@ -418,18 +418,20 @@ function fire(run, sn, y) {
 
 function updateShots(run, events, pr, pw) {
   const kept = [];
+  const ghostly = pw === 'phase' || pw === 'exorcise'; // shots pass through you
   for (const s of run.shots) {
     let gone = false;
     if (s.kind === 'bomb' && s.mode !== 'fly') {
       if (s.mode === 'fuse') { if (--s.fuse <= 0) { s.mode = 'blast'; s.blast = BLAST_TICKS; events.push('boom'); } }
       else {
-        if (!s.hit && pw !== 'phase' && Math.abs(run.x - s.x) < BLAST_R + pr) { s.hit = true; if (hurt(run, events, 'snail')) return true; }
+        if (!s.hit && !ghostly && Math.abs(run.x - s.x) < BLAST_R + pr) { s.hit = true; if (hurt(run, events, 'snail')) return true; }
         if (--s.blast <= 0) gone = true;
       }
     } else {
-      s.x += s.vx * TICK; s.y += s.vy * TICK;
+      const sm = pw === 'slowmo' ? SLOWMO_MULT : 1; // Slow-mo slows the aliens' shots as well as the wreckage
+      s.x += s.vx * TICK * sm; s.y += s.vy * TICK * sm;
       if (s.kind === 'bomb' && s.y >= PY) { s.y = PY; s.vx = 0; s.vy = 0; s.mode = 'fuse'; }
-      else if (s.kind !== 'bomb' && pw !== 'phase' && Math.hypot(s.x - run.x, s.y - PY) < s.r + pr) {
+      else if (s.kind !== 'bomb' && !ghostly && Math.hypot(s.x - run.x, s.y - PY) < s.r + pr) {
         gone = true;
         if (hurt(run, events, 'snail')) return true;
       }

@@ -2,7 +2,7 @@
 // some shake, steers for the middle of the next gap and, when ghosts are about, picks the
 // spot in the gap that is free of ghosts when the bar arrives.
 import {
-  TICK, PY, PR, GR, LAT, BLAST_R, ghostPhase, speedAt, newRun, step, mulberry32, ghostX,
+  POWERS, BUBBLE_TICKS, HEAL_SAFE_TICKS, HEARTS, TICK, PY, PR, GR, LAT, BLAST_R, ghostPhase, speedAt, newRun, step, mulberry32, ghostX,
 } from '../src/core.js';
 
 // How dangerous standing at x is, given the shots in flight (0 = safe, 1 = about to be hit).
@@ -19,12 +19,18 @@ export function shotDanger(run, x) {
   return d;
 }
 
-export function playBot(track, ghosts, { seed = 1, shake = 0.012, reaction = 9, lookahead = true, maxTicks = 60 * 150 } = {}) {
+export function playBot(track, ghosts, { seed = 1, shake = 0.012, reaction = 9, lookahead = true, maxTicks = 60 * 150, grant = null } = {}) {
   const rng = mulberry32(seed * 7919 + 13);
   const startX = 0.15 + rng() * 0.7; // each run starts where the player happened to touch
   const run = newRun(track, ghosts, startX);
   let target = startX, hold = 0;
   while (run.alive && run.tick < maxTicks) {
+    if (grant && run.tick === grant.tick) { // tuning: hand the bot a helper's gift at this moment
+      if (grant.kind === 'shield') run.bubble = BUBBLE_TICKS + 1;
+      else if (grant.kind === 'heal') { if (run.hearts < HEARTS) run.hearts++; else run.invuln = HEAL_SAFE_TICKS + 1; }
+      else if (grant.kind) { run.power = grant.kind; run.powerLeft = POWERS[grant.kind].ticks + 1; }
+      run.atGrant = { score: run.score, hearts: run.hearts };
+    }
     if (hold-- <= 0) {
       hold = reaction;
       const b = run.track.bar(run.next);
