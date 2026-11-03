@@ -19,8 +19,14 @@ export const GRACE = 120;      // ticks at the start when ghosts cannot hurt you
 export const GRAZE = 0.012;    // passing a bar edge closer than this is a graze
 export const MAX_TICKS = 60 * 240;
 export const MAX_GHOSTS = 2;  // your best run and your last run
-export const GHOST_JOIN = [0, 15]; // bars you must pass before each ghost joins: the captain at once, the last flight deeper in
-export const JOIN_GRACE = 90;      // a ghost that joins mid-run needs 1.5 s to wake before it can touch you
+// The crew come and go. They first find you after 10 to 15 s, stay 12 to 18 s, then drift away for
+// 12 to 18 s, and so on, at times fixed by the board. While they are away something else is after you:
+// an alien nest or a tight patch of wreckage. Early on a few aliens keep you busy.
+export const FIRST_VISIT = [600, 900];
+export const VISIT_STAY = [720, 1080];
+export const VISIT_AWAY = [720, 1080];
+export const JOIN_GRACE = 90;      // a visiting ghost needs 1.5 s to wake before it can touch you
+export const LEAVE_GRACE = 45;     // and cannot touch you for its last 0.75 s as it fades
 
 export const PTS_BAR = 10;
 export const PTS_GRAZE = 5;
@@ -67,11 +73,11 @@ export const NITRO_TICKS = POWERS.nitro.ticks; // 4 s
 // Snails sit on the solid part of a bar and, from bar SNAIL_FROM on, throw something at you.
 // They shake and glow for TELEGRAPH_DIST of falling before they fire, and fire when their bar is
 // FIRE_DIST above your row. A shot costs a heart, exactly like touching a ghost.
-export const SNAIL_FROM = 10;
+export const SNAIL_FROM = 4;
 export const FIRE_DIST = 0.8;
 export const TELEGRAPH_DIST = 0.4;
 export const WEAPONS = {
-  hammer: { r: 0.028, vy: 1.7,  weight: 3, from: 10 },   // fast, straight at where you stood
+  hammer: { r: 0.028, vy: 1.7,  weight: 3, from: 4 },    // fast, straight at where you stood
   jacks:  { r: 0.02,  vy: 0.95, weight: 2, from: 24 },   // a fan of three slow spinning jacks
   bomb:   { r: 0.03,  vy: 1.0,  weight: 2, from: 36 },   // lands, ticks, then a wide blast
 };
@@ -116,17 +122,46 @@ export function makeTrack(seed) {
   const rng = mulberry32(seed);
   const bars = [];
   let c = 0.5;
+
+  // When the crew visit, and what is after you the rest of the time. Its own random stream.
+  const trng = mulberry32((seed ^ 0xc0ffee) >>> 0);
+  const between = ([lo, hi]) => lo + Math.floor(trng() * (hi - lo + 1));
+  const windows = [];
+  for (let start = between(FIRST_VISIT), k = 0; start < MAX_TICKS; k++) {
+    const end = start + between(VISIT_STAY), away = between(VISIT_AWAY);
+    windows.push({ start, end, mode: k === 0 ? 'captain' : k === 1 ? 'last' : 'both', after: trng() < 0.5 ? 'snails' : 'tough' });
+    start = end + away;
+  }
+  const ghostWindow = (tick) => windows.find((w) => tick >= w.start && tick < w.end) ?? null;
+  // What is after you at this moment: the early aliens, the visiting crew, or the patch that follows a visit.
+  const phaseAtTick = (tick) => {
+    if (tick < windows[0].start) return { kind: 'early' };
+    const w = ghostWindow(tick);
+    if (w) return { kind: 'ghost', mode: w.mode };
+    return { kind: 'patch', patch: windows.filter((x) => x.end <= tick).at(-1).after };
+  };
+  const Dt = [0]; // distance scrolled after n ticks (without Slow-mo), to know when a bar arrives
+  const tickAt = (dist) => {
+    while (Dt.at(-1) < dist) Dt.push(Dt.at(-1) + speedAt(Dt.at(-1)) * TICK);
+    let lo = 0, hi = Dt.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (Dt[m] >= dist) hi = m; else lo = m + 1; }
+    return lo;
+  };
+
   const bar = (i) => {
     while (bars.length <= i) {
       const k = bars.length;
       const spacing = 0.46 + rng() * 0.2;
       const d = k ? bars[k - 1].d + spacing : 0.2;
-      const w = lerp(0.30, 0.21, Math.min(1, k / 60));
+      const phase = phaseAtTick(tickAt(d + PY));
+      const tough = phase.kind === 'patch' && phase.patch === 'tough'; // narrower gaps, fewer of them, bigger swings
+      const w = lerp(0.30, 0.21, Math.min(1, k / 60)) * (tough ? 0.82 : 1);
       // Never ask for a shift you cannot make in the time between two bars.
-      const maxShift = Math.min(0.28, 0.6 * LAT * spacing / speedAt(d + PY));
+      const maxShift = tough ? Math.min(0.34, 0.72 * LAT * spacing / speedAt(d + PY)) : Math.min(0.28, 0.6 * LAT * spacing / speedAt(d + PY));
       c = clamp(c + (rng() * 2 - 1) * maxShift, w / 2 + 0.03, 1 - w / 2 - 0.03);
       const gaps = [{ c, w }];
-      const extra = rng() < 0.5 ? 3 : 2;
+      const moreGaps = rng() < 0.5;
+      const extra = tough ? 1 : moreGaps ? 3 : 2;
       for (let e = 0; e < extra; e++) {
         const ew = w * (0.75 + rng() * 0.35);
         for (let tries = 0; tries < 10; tries++) {
@@ -141,7 +176,7 @@ export function makeTrack(seed) {
         gaps.push({ c: left >= right ? 0.03 + ew / 2 : 1 - 0.03 - ew / 2, w: ew });
       }
       gaps.sort((a, b) => a.c - b.c);
-      bars.push({ i: k, d, c, w, gaps });
+      bars.push({ i: k, d, c, w, gaps, tough, phase });
     }
     return bars[i];
   };
@@ -188,8 +223,11 @@ export function makeTrack(seed) {
       const k = snails.length;
       const [r1, r2, r3, r4] = [srng(), srng(), srng(), srng()]; // always four draws, so branches never shift the stream
       let s = null;
-      const chance = k < SNAIL_FROM ? 0 : Math.min(0.3, 0.07 + (k - SNAIL_FROM) * 0.004);
-      if (r1 < chance && k - lastSnail >= 2) {
+      const ph = bar(k).phase;
+      const chance = k < SNAIL_FROM ? 0 : ph.kind === 'early' ? 0.3 : ph.kind === 'ghost' ? 0.1 : ph.patch === 'snails' ? 0.7 : 0.12;
+      // While the crew are away, and before they first come, never go long without an alien.
+      const nest = k >= SNAIL_FROM && (ph.kind === 'early' || (ph.kind === 'patch' && ph.patch === 'snails')) && k - lastSnail >= 4;
+      if ((r1 < chance || nest) && k - lastSnail >= 2) {
         const b = bar(k), segs = [];
         let from = 0;
         for (const g of b.gaps) { segs.push([from, g.c - g.w / 2]); from = g.c + g.w / 2; }
@@ -205,7 +243,7 @@ export function makeTrack(seed) {
     }
     return snails[i];
   };
-  return { seed, bar, friend, snail };
+  return { seed, bar, friend, snail, windows, ghostWindow, phaseAtTick };
 }
 
 // ---------- ghosts ----------
@@ -248,8 +286,6 @@ export function newRun(track, ghosts = [], startX = 0.5) {
     track, ghosts, tick: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
     hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0),
-    // ghost gi joins once you have passed GHOST_JOIN[gi] bars, and can touch you from armAt[gi] on
-    joinedAt: ghosts.map((_, i) => (GHOST_JOIN[i] === 0 ? 0 : -1)), armAt: ghosts.map((_, i) => (GHOST_JOIN[i] === 0 ? GRACE : Infinity)),
     power: null, powerLeft: 0, bubble: 0, invuln: 0, phase: -1, nf: 0, friends: 0,
     ns: 0, shots: [], shotId: 0, lenient: false,
   };
@@ -290,9 +326,10 @@ export function applyMove(run, x) {
     } else { run.power = f.kind; run.powerLeft = POWERS[f.kind].ticks + 1; events.push(`power:${f.kind}`); }
   }
 
-  // Later ghosts join as you go deeper, waking for JOIN_GRACE before they can touch you.
-  for (let gi = 0; gi < run.ghosts.length; gi++) {
-    if (run.joinedAt[gi] < 0 && run.passed >= (GHOST_JOIN[gi] ?? 0)) { run.joinedAt[gi] = run.tick; run.armAt[gi] = run.tick + JOIN_GRACE; events.push('join'); }
+  // The crew arrive and leave on the board's schedule.
+  for (const w of run.track.windows ?? []) {
+    if (w.start === run.tick) events.push('join');
+    else if (w.end === run.tick) events.push('leave');
   }
 
   // Past runs. A touch costs a heart (or pops a Shield bubble), then you are safe for a moment.
@@ -300,7 +337,7 @@ export function applyMove(run, x) {
     for (let gi = 0; gi < run.ghosts.length; gi++) {
       const g = run.ghosts[gi];
       const q = g.xs[run.tick - 1];
-      if (run.tick <= run.armAt[gi] || q === undefined || run.shatteredUntil[gi] > run.tick || Math.abs(x - q / 65535) >= pr + GR) continue;
+      if (q === undefined || run.shatteredUntil[gi] > run.tick || Math.abs(x - q / 65535) >= pr + GR || !ghostPhase(run.track, run.ghosts.length, gi, run.tick).armed) continue;
       run.shatteredUntil[gi] = run.tick + SHATTER_TICKS;
       run.hitGhost = g;
       if (hurt(run, events, 'ghost')) return events;
@@ -419,6 +456,17 @@ export function gapMargin(bar, x, pr = PR, widen = 1) {
   let best = -Infinity;
   for (const g of bar.gaps) best = Math.max(best, Math.min(x - pr - (g.c - g.w * widen / 2), g.c + g.w * widen / 2 - (x + pr)));
   return best;
+}
+
+// Is ghost gi visiting right now? Visits start with the captain, then the last flight, then both.
+const NO_GHOST = { visible: false, armed: false, fade: 0 };
+export function ghostPhase(track, nGhosts, gi, tick) {
+  const w = track.ghostWindow(tick);
+  if (!w) return NO_GHOST;
+  const ok = w.mode === 'both' || (w.mode === 'captain' && gi === 0) || (w.mode === 'last' && gi === (nGhosts > 1 ? 1 : 0));
+  if (!ok) return NO_GHOST;
+  const into = tick - w.start, left = w.end - tick;
+  return { visible: true, armed: into > JOIN_GRACE && left > LEAVE_GRACE, fade: clamp(Math.min(into / 40, left / 40), 0, 1) };
 }
 
 // Where a ghost is on this tick, or null once its run has ended.

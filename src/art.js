@@ -198,7 +198,7 @@ function drawScenery(ctx, w, h, seed, scroll, t) {
 
 // ---------- wreckage (the bars) ----------
 
-export function drawGirder(ctx, x0, x1, y, h, t) {
+export function drawGirder(ctx, x0, x1, y, h, t, hot = false) {
   const w = x1 - x0;
   if (w < 3) return;
   ctx.save();
@@ -214,7 +214,7 @@ export function drawGirder(ctx, x0, x1, y, h, t) {
   // hazard stripes where the plate was torn off, and a warning light
   const cap = Math.min(14, w / 3);
   ctx.globalAlpha = 0.9; ctx.save(); ctx.beginPath(); ctx.rect(x0, y - h / 2, cap, h); ctx.rect(x1 - cap, y - h / 2, cap, h); ctx.clip();
-  ctx.fillStyle = PAL.amber; ctx.fillRect(x0 - 2, y - h / 2, w + 4, h);
+  ctx.fillStyle = hot ? '#ff5a4d' : PAL.amber; ctx.fillRect(x0 - 2, y - h / 2, w + 4, h);
   ctx.fillStyle = PAL.hazard;
   for (let k = -h; k < w + h; k += 8) { ctx.beginPath(); ctx.moveTo(x0 + k, y + h / 2); ctx.lineTo(x0 + k + 4, y + h / 2); ctx.lineTo(x0 + k + 4 + h, y - h / 2); ctx.lineTo(x0 + k + h, y - h / 2); ctx.fill(); }
   ctx.restore();

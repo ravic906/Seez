@@ -4,15 +4,16 @@ import {
   makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
   NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GOLD_MULT,
-  TIER_FROM, powerWeight, GHOST_JOIN, JOIN_GRACE, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
+  TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
 
 const SNAIL = (kind, x = 0.3) => (i) => (i === 0 ? { bar: 0, x, kind } : null);
 const FAR = { id: 99, bar: 999, d: 1e9, x: 0.5, kind: 'nitro' };
 // A track whose every bar has the same gaps, for exact tests. `friend` is an optional first friend.
-const fixedTrack = (gaps, friend = null, snail = () => null) => ({
-  seed: 0, snail, friend: (j) => (Array.isArray(friend) ? friend[j] : j === 0 ? friend : null) ?? FAR,
+const OPEN_VISIT = { start: GRACE - JOIN_GRACE, end: 1e9, mode: 'both', after: 'snails' };
+const fixedTrack = (gaps, friend = null, snail = () => null, visit = OPEN_VISIT) => ({
+  seed: 0, snail, windows: [], ghostWindow: (t) => (visit && t >= visit.start && t < visit.end ? visit : null), friend: (j) => (Array.isArray(friend) ? friend[j] : j === 0 ? friend : null) ?? FAR,
   bar: (i) => ({ i, d: 0.2 + i * 0.6, c: gaps[0].c, w: gaps[0].w, gaps }),
 });
 const wide = fixedTrack([{ c: 0.5, w: 1 }]);
@@ -409,36 +410,108 @@ test('a ghost touch costs a heart and starts a safe moment; a ghost that hit you
 
 test('after every ghost hit you get a clear safe window, even with two ghosts on you', () => {
   const run = newRun(wide, [ghostFrom(0.5, 700, 'best'), ghostFrom(0.5, 700, 'recent')], 0.5);
-  run.passed = GHOST_JOIN[1]; // both ghosts are in play
   const hits = [];
   for (let t = 1; t <= 700 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hits.push(t);
   assert.equal(hits.length, HEARTS);
   for (let i = 1; i < hits.length; i++) assert.ok(hits[i] - hits[i - 1] >= SHIELD_TICKS, `hits ${i - 1} and ${i} are ${hits[i] - hits[i - 1]} ticks apart`);
 });
 
-test('only the captain comes at first: the last flight joins after 15 bars, fading in with time to wake', () => {
-  assert.deepEqual(GHOST_JOIN, [0, 15]);
-  const run = newRun(wide, [ghostFrom(0.95, 900, 'best'), ghostFrom(0.5, 900, 'recent')], 0.5);
-  for (let t = 0; t < 400; t++) step(run, 0.5);
-  assert.ok(run.passed < GHOST_JOIN[1]);
-  assert.equal(run.hearts, HEARTS, 'the second ghost sits on you but has not joined yet');
-  assert.equal(run.joinedAt[1], -1);
-  run.passed = GHOST_JOIN[1];
-  const ev = step(run, 0.5);
-  assert.ok(ev.includes('join'), 'the join is announced');
-  assert.equal(run.armAt[1], run.tick + JOIN_GRACE);
-  for (let t = 0; t < JOIN_GRACE; t++) step(run, 0.5);
-  assert.equal(run.hearts, HEARTS, 'overlapping a ghost that is still waking costs nothing');
-  const more = [];
-  for (let t = 0; t < 10; t++) more.push(...step(run, 0.5));
-  assert.ok(more.includes('hurt'), 'once awake it counts');
+test('the crew visit on a schedule: first after 10 to 15 s, staying 12 to 18 s, away 12 to 18 s, set by the board', () => {
+  for (let seed = 1; seed <= 40; seed++) {
+    const t = makeTrack(seed), w = t.windows;
+    assert.deepEqual(w, makeTrack(seed).windows, 'the same every time');
+    assert.ok(w[0].start >= FIRST_VISIT[0] && w[0].start <= FIRST_VISIT[1], `first visit at ${w[0].start}`);
+    for (let i = 0; i < w.length; i++) {
+      const stay = w[i].end - w[i].start;
+      assert.ok(stay >= VISIT_STAY[0] && stay <= VISIT_STAY[1], `stay ${stay}`);
+      if (i) { const away = w[i].start - w[i - 1].end; assert.ok(away >= VISIT_AWAY[0] && away <= VISIT_AWAY[1], `away ${away}`); }
+    }
+    assert.ok(w.at(-1).end > MAX_TICKS - 3000, 'visits continue through a long run');
+    assert.deepEqual(w.slice(0, 3).map((x) => x.mode), ['captain', 'last', 'both'], 'one ghost at first, then both');
+  }
+  const starts = new Set(Array.from({ length: 40 }, (_, i) => makeTrack(i + 1).windows[0].start));
+  assert.ok(starts.size > 10, 'it is random from board to board');
 });
 
-test('a ghost whose run was short never joins, and a single ghost is simply the captain', () => {
-  const run = newRun(wide, [ghostFrom(0.95, 900, 'best')], 0.5);
+test('a visit fades in and wakes before it can touch you, and cannot touch you as it leaves', () => {
+  const t = { ghostWindow: (k) => (k >= 1000 && k < 1900 ? { start: 1000, end: 1900, mode: 'captain' } : null) };
+  assert.equal(ghostPhase(t, 2, 0, 999).visible, false);
+  const early = ghostPhase(t, 2, 0, 1010);
+  assert.ok(early.visible && !early.armed && early.fade > 0 && early.fade < 1);
+  assert.equal(ghostPhase(t, 2, 0, 1000 + JOIN_GRACE).armed, false);
+  assert.equal(ghostPhase(t, 2, 0, 1000 + JOIN_GRACE + 1).armed, true);
+  assert.equal(ghostPhase(t, 2, 0, 1900 - LEAVE_GRACE).armed, false);
+  assert.equal(ghostPhase(t, 2, 0, 1900 - LEAVE_GRACE - 1).armed, true);
+  assert.equal(ghostPhase(t, 2, 0, 1899).visible, true);
+  assert.equal(ghostPhase(t, 2, 0, 1900).visible, false);
+  assert.equal(ghostPhase(t, 2, 1, 1500).visible, false, 'a captain-only visit leaves the last flight out');
+});
+
+test('visit modes: captain, then the last flight (or the captain if it is all you have), then both', () => {
+  const win = (mode) => ({ ghostWindow: () => ({ start: 0, end: 1e9, mode }) });
+  assert.deepEqual([0, 1].map((g) => ghostPhase(win('captain'), 2, g, 500).visible), [true, false]);
+  assert.deepEqual([0, 1].map((g) => ghostPhase(win('last'), 2, g, 500).visible), [false, true]);
+  assert.deepEqual([0].map((g) => ghostPhase(win('last'), 1, g, 500).visible), [true], 'with one ghost, it takes both turns');
+  assert.deepEqual([0, 1].map((g) => ghostPhase(win('both'), 2, g, 500).visible), [true, true]);
+});
+
+test('ghosts only touch you during a visit, and not at all between visits', () => {
+  const visit = { start: 100, end: 500, mode: 'both', after: 'snails' };
+  const run = newRun(fixedTrack([{ c: 0.5, w: 1 }], null, () => null, visit), [ghostFrom(0.5, 2000, 'best')], 0.5);
+  const hurtAt = [];
+  for (let t = 1; t <= 900 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hurtAt.push(t);
+  assert.ok(hurtAt.length >= 1 && hurtAt.every((t) => t > visit.start + JOIN_GRACE && t <= visit.end - LEAVE_GRACE), `hits at ${hurtAt}`);
+  const events = [];
+  const again = newRun(fixedTrack([{ c: 0.5, w: 1 }], null, () => null, visit), [], 0.5);
+  for (let t = 0; t < 600; t++) events.push(...step(again, 0.5));
+  assert.equal(events.filter((e) => e === 'join').length, 0, 'join and leave come from the track window list');
+});
+
+test('on a real board the crew arrive and leave at the scheduled moments', () => {
+  const track = makeTrack(5);
+  const run = newRun(track, [], 0.5);
+  run.lenient = true;
+  const seen = [];
+  while (run.alive && run.tick < 60 * 80) for (const e of step(run, track.bar(run.next).c)) if (e === 'join' || e === 'leave') seen.push([e, run.tick]);
+  const expected = track.windows.filter((w) => w.end < 60 * 80).flatMap((w) => [['join', w.start], ['leave', w.end]]);
+  assert.ok(run.alive && expected.length >= 3);
+  assert.deepEqual(seen.slice(0, expected.length), expected);
+});
+
+test('something is always after you: a ghost visit, an alien nest, or a tight patch', () => {
+  for (const seed of [1, 5, 11, 20261103, 99]) {
+    const t = makeTrack(seed);
+    const kinds = new Set();
+    for (let k = SNAIL_FROM + 4; k < 160; k++) {
+      const b = t.bar(k), ph = b.phase;
+      kinds.add(ph.kind === 'patch' ? ph.patch : ph.kind);
+      if (ph.kind === 'ghost') continue;                              // the crew are the threat
+      if (ph.kind === 'patch' && ph.patch === 'tough') { assert.equal(b.tough, true, `bar ${k} should be tight`); continue; }
+      let near = false;                                                // early aliens or a nest: an alien within 4 bars
+      for (let j = k - 4; j <= k; j++) if (t.snail(j)) near = true;
+      assert.ok(near, `seed ${seed}: bar ${k} (${ph.kind}${ph.patch ? ' ' + ph.patch : ''}) has no alien within 4 bars`);
+    }
+    assert.ok(kinds.has('ghost') && (kinds.has('snails') || kinds.has('tough')), `seed ${seed} mixes threats: ${[...kinds]}`);
+  }
+});
+
+test('tight patches have narrower gaps and fewer of them', () => {
+  let tight = [], normal = [];
+  for (let seed = 1; seed <= 20; seed++) {
+    const t = makeTrack(seed);
+    for (let k = 10; k < 120; k++) { const b = t.bar(k); (b.tough ? tight : normal).push(b); }
+  }
+  assert.ok(tight.length > 100 && normal.length > 100);
+  const mean = (list, f) => list.reduce((a, b) => a + f(b), 0) / list.length;
+  assert.ok(tight.every((b) => b.gaps.length === 2), 'exactly two gaps in a tight patch');
+  assert.ok(mean(tight, (b) => b.gaps.length) < mean(normal, (b) => b.gaps.length));
+  assert.ok(mean(tight, (b) => b.w) < mean(normal, (b) => b.w) * 0.9, 'the main gap is narrower');
+});
+
+test('a ghost whose run was short never shows up, and the rest of the run carries on', () => {
+  const run = newRun(fixedTrack([{ c: 0.5, w: 1 }]), [ghostFrom(0.95, 100, 'best')], 0.5);
   for (let t = 0; t < 200; t++) step(run, 0.5);
-  assert.equal(run.joinedAt.length, 1);
-  assert.equal(run.armAt[0], GRACE);
+  assert.equal(run.hearts, HEARTS);
 });
 
 test('you can always escape: slide clear in the safe window and you keep your remaining hearts', () => {

@@ -1,6 +1,6 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, PY, PR, BAR_T, GRACE, GHOST_JOIN, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, WIDEN_MULT, POWERS, speedAt,
+  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, WIDEN_MULT, POWERS, speedAt,
   newRun, step, makeTrack, pickGhosts, ghostX, encodeXs, decodeXs,
 } from './core.js';
 import {
@@ -66,7 +66,7 @@ function showReady() {
   $('start').hidden = false; $('over').hidden = true;
   $('hud').hidden = false; $('legend').hidden = false; $('caption').hidden = true; $('skip').hidden = true;
   const n = ghosts.length;
-  $('start-hint').textContent = n === 0 ? 'Touch anywhere to start.' : n === 1 ? 'A crew ghost waits. Touch anywhere to start.' : 'A crew ghost waits, and another joins deeper in. Touch anywhere to start.';
+  $('start-hint').textContent = n === 0 ? 'Touch anywhere to start.' : 'The crew will find you about 10 seconds in. Touch anywhere to start.';
   const best = bestScore();
   $('board').textContent = `${boardLabel(seed)}${best ? ` · best ${best}` : ''}`;
   $('score').textContent = '0'; $('status').textContent = '';
@@ -76,7 +76,7 @@ function showReady() {
 }
 
 function renderLegend() {
-  $('legend').innerHTML = ghosts.map((g, i) => `<span><i style="background:${g.kind === 'best' ? PAL.captain : PAL.crew}"></i>${g.kind === 'best' ? 'Captain' : 'Last flight'} ${g.score}${GHOST_JOIN[i] ? ` · from bar ${GHOST_JOIN[i]}` : ''}</span>`).join('');
+  $('legend').innerHTML = ghosts.map((g) => `<span><i style="background:${g.kind === 'best' ? PAL.captain : PAL.crew}"></i>${g.kind === 'best' ? 'Captain' : 'Last flight'} ${g.score}</span>`).join('');
 }
 
 function startRun(startX) {
@@ -256,9 +256,9 @@ function guideRow(list, icon, title, text) {
 function buildGuide() {
   const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
-  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. Your best run, the captain (gold), is waiting from the start. Your last flight (blue) joins after you pass 15 bars, fading in with time to wake. A touch costs a suit cell, then you get a safe moment.');
+  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15, then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. A touch costs a suit cell, then you get a safe moment.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
-  guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Aliens', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide.');
+  guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Aliens', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
   guideRow(aliens, shot('hammer'), 'Hammer', 'Fast and straight at where you were.');
   guideRow(aliens, shot('jack'), 'Jacks', 'A fan of three slow spinning jacks. Slip between them.');
@@ -317,7 +317,8 @@ function handleEvents(events) {
     else if (e === 'bubble') { sound.power(); say('SHIELD', '#9fe6ff'); }
     else if (e === 'heal') { sound.heal(); say('REPAIR', PAL.warn); burst(sx(run.x), sy(PY), '#ff8a96', 10); }
     else if (e.startsWith('power:')) { const k = e.slice(6); sound.power(); say(POWER_NAME[k].toUpperCase(), tierColor(k)); burst(sx(run.x), sy(PY), tierColor(k), 14); }
-    else if (e === 'join') { sound.join(); say('A CREW MEMBER JOINS', PAL.crew, -52); }
+    else if (e === 'join') { sound.join(); say('THE CREW FINDS YOU', PAL.crew, -52); }
+    else if (e === 'leave') { say('the crew drifts away', PAL.muted, -52); }
     else if (e === 'fire') sound.fire();
     else if (e === 'boom') { sound.boom(); shake = Math.max(shake, 0.35); }
   }
@@ -348,9 +349,9 @@ function drawGame(dt) {
     const h = BAR_T * scale;
     for (const g of b.gaps) {
       const a = Math.max(0, g.c - (g.w * widen) / 2), z = Math.min(1, g.c + (g.w * widen) / 2);
-      drawGirder(ctx, sx(from), sx(a), y, h, t); from = z;
+      drawGirder(ctx, sx(from), sx(a), y, h, t, b.tough); from = z;
     }
-    drawGirder(ctx, sx(from), sx(1), y, h, t);
+    drawGirder(ctx, sx(from), sx(1), y, h, t, b.tough);
     const sn = track.snail(i);
     if (sn) {
       const fireY = PY - FIRE_DIST;
@@ -380,13 +381,13 @@ function drawGame(dt) {
   list.forEach((g, gi) => {
     const gx = ghostX(g, tick);
     if (gx === null) return;
-    if (!run && gi > 0) return;                        // on the start screen only the captain waits
-    if (run && run.joinedAt[gi] < 0) return;           // later ghosts have not joined yet
-    const fadeIn = run && run.joinedAt[gi] > 0 ? Math.min(1, (tick - run.joinedAt[gi]) / 40) : 1;
+    if (!run) return;                                  // on the start screen nobody is out here yet
+    const ph = ghostPhase(track, list.length, gi, tick);
+    if (!ph.visible) return;                           // this one is not visiting right now
     const shat = run && run.shatteredUntil[gi] > tick ? (run.shatteredUntil[gi] - tick) / SHATTER_TICKS : 0;
     drawCrew(ctx, sx(gx), sy(PY), PR * scale, {
-      t, kind: g.kind, armed: run ? tick > run.armAt[gi] : false, shattered: shat, vx: px(g, tick),
-      near: run ? Math.abs(gx - run.x) < 0.14 : false, fade: (pw === 'exorcise' ? 0.22 : 1) * fadeIn,
+      t, kind: g.kind, armed: ph.armed, shattered: shat, vx: px(g, tick),
+      near: ph.armed && Math.abs(gx - run.x) < 0.14, fade: (pw === 'exorcise' ? 0.22 : 1) * ph.fade,
     });
     if (pw === 'foresight') { // where this crew member will be as the wreckage arrives
       ctx.save();
@@ -445,9 +446,20 @@ function drawGame(dt) {
   ctx.restore();
 }
 
+// What is after you right now, so there is always something to read on screen.
+function threatLabel(r) {
+  const ph = r.track.phaseAtTick(r.tick);
+  if (ph.kind === 'early') return 'aliens in the wreckage';
+  if (ph.kind === 'patch') return ph.patch === 'tough' ? 'tight wreckage' : 'alien nest';
+  if (!r.ghosts.length) return 'the crew is quiet';
+  const g = r.ghosts.map((_, i) => ghostPhase(r.track, r.ghosts.length, i, r.tick));
+  return g.some((x) => x.visible && !x.armed) ? 'the crew is waking' : 'the crew is after you';
+}
+
 // ---------- main loop ----------
 
 function frame(ts) {
+  requestAnimationFrame(frame); // first, so one bad frame can never freeze the game
   const dt = Math.min(0.1, (ts - (last || ts)) / 1000);
   last = ts; clock += dt;
   if (state === 'intro') {
@@ -467,16 +479,13 @@ function frame(ts) {
       $('score').textContent = run.score;
       setHearts(run.hearts); setChips(run);
       if (run.power !== lastMood) { lastMood = run.power; sound.mood(run.power); }
-      const wake = run.ghosts.length && run.tick < GRACE ? ((GRACE - run.tick) / 60).toFixed(1) : null;
-      const waking = run.armAt.some((a, i) => run.joinedAt[i] > 0 && run.tick <= a);
-      $('status').textContent = wake ? `crew wakes in ${wake}s` : waking ? 'a crew member is waking' : run.ghosts.length ? 'crew awake' : '';
+      $('status').textContent = threatLabel(run);
       if (!run.alive) endRun();
     } else if (state === 'dying' && clock >= overAt) { setChips(null); showOver(); }
     shake = Math.max(0, shake - dt * 2.2);
     if (bump > 0) { bump = Math.max(0, bump - dt * 6); $('score').classList.toggle('bump', bump > 0.4); }
     drawGame(dt);
   }
-  requestAnimationFrame(frame);
 }
 
 // ---------- boot ----------
