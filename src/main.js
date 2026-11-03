@@ -1,49 +1,59 @@
-// Echoes: canvas rendering, touch controls, saving and sound. All rules live in core.js.
+// Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, W, PY, PR, GR, BAR_T, GRACE, newRun, step, makeTrack, pickGhosts, ghostX, encodeXs, decodeXs,
-  PTS_BAR,
+  TICK, PY, PR, BAR_T, GRACE, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, WIDEN_MULT, POWERS, speedAt,
+  newRun, step, makeTrack, pickGhosts, ghostX, encodeXs, decodeXs,
 } from './core.js';
+import {
+  PAL, makeStars, drawSpace, drawGirder, drawIcon, drawBot, drawCrew, drawFriend, drawAlien, drawShot,
+  POWER_NAME, POWER_HELP, tierColor,
+} from './art.js';
+import { drawIntro, INTRO_LENGTH, captionAt } from './intro.js';
 import { loadStore, saveStore, dailySeed, boardLabel, runsFor, recordRun } from './store.js';
+import { isDaily } from './board.js';
+import { connect, createBoard } from './leaderboard.js';
+import { randomHandle } from './names.js';
 import { makeSound } from './sound.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), cv = $('cv'), ctx = cv.getContext('2d');
 const dbg = new URLSearchParams(location.search).has('debug');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const TAU = Math.PI * 2;
 
 // ---------- state ----------
 
 let store = loadStore();
-let seed = store.seed ?? dailySeed();
+if (!store.handle) { store.handle = randomHandle(); saveStore(store); }
+let seed = store.seed && !isDaily(store.seed) ? store.seed : dailySeed(); // old daily boards roll over to today
 let track = makeTrack(seed);
-let state = 'ready';            // ready | playing | dying | over
+let state = 'boot';              // boot | intro | ready | playing | dying | over
 let run = null, ghosts = [];
 let target = 0.5, keyDir = 0;
-let acc = 0, last = 0, clock = 0;
-let overAt = 0, shake = 0, bump = 0;
-const particles = [], floaters = [], ghostPops = [];
-let theme = null;
+let acc = 0, last = 0, clock = 0, introT = 0, introGuard = 0;
+let overAt = 0, shake = 0, bump = 0, flash = { c: '255,77,94', a: 0 };
+const particles = [], floaters = [];
+const stars = makeStars(11, 150);
 const sound = makeSound(() => store.sound !== false);
+let board = null, boardScope = 'today', runToken = 0;
 
-// ---------- layout and theme ----------
+// ---------- layout ----------
 
 let cssW = 0, cssH = 0, dpr = 1, scale = 1, baseY = 0;
 function layout() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   cssW = stage.clientWidth; cssH = stage.clientHeight;
   cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr);
-  scale = cssW / W;           // world width 1 spans the field
-  baseY = cssH * 0.78;        // your row sits low on the screen, thumb below it
+  scale = cssW;            // world width 1 spans the field
+  baseY = cssH * 0.78;     // your row sits low on the screen, with room for a thumb below it
 }
 const sx = (x) => x * scale;
 const sy = (y) => baseY + (y - PY) * scale;
 
-function readTheme() {
-  const s = getComputedStyle(document.documentElement);
-  const v = (n) => s.getPropertyValue(`--${n}`).trim();
-  theme = { field: v('field'), bar: v('bar'), edge: v('bar-edge'), you: v('you'), best: v('best'), recent: v('recent'), ink: v('ink'), muted: v('muted') };
-}
+// ---------- boards, ghosts, flow ----------
 
-// ---------- the board and saved runs ----------
+const crewRuns = () => runsFor(store, seed).map((r) => ({ xs: decodeXs(r.x), score: r.s }));
+const ghostsNow = () => pickGhosts(crewRuns());
+const bestScore = () => store.boards?.[seed]?.best?.s ?? 0;
 
 function setBoard(newSeed) {
   seed = newSeed; track = makeTrack(seed);
@@ -51,77 +61,95 @@ function setBoard(newSeed) {
   showReady();
 }
 
-function ghostsNow() {
-  return pickGhosts(runsFor(store, seed).map((r) => ({ xs: decodeXs(r.x), score: r.s })));
-}
-
-function bestScore() {
-  const b = store.boards?.[seed]?.best;
-  return b ? b.s : 0;
-}
-
-// ---------- flow ----------
-
 function showReady() {
   state = 'ready'; run = null; ghosts = ghostsNow();
   $('start').hidden = false; $('over').hidden = true;
+  $('hud').hidden = false; $('legend').hidden = false; $('caption').hidden = true; $('skip').hidden = true;
+  const n = ghosts.length;
+  $('start-hint').textContent = n ? `${n} crew ghost${n > 1 ? 's' : ''} waiting. Touch anywhere to start.` : 'Touch anywhere to start.';
   const best = bestScore();
-  $('start-hint').textContent = ghosts.length ? `${ghosts.length} ghost${ghosts.length > 1 ? 's' : ''} waiting. Touch anywhere to start.` : 'Touch anywhere to start.';
   $('board').textContent = `${boardLabel(seed)}${best ? ` · best ${best}` : ''}`;
   $('score').textContent = '0'; $('status').textContent = '';
+  setHearts(HEARTS); setChips(null);
   renderLegend();
+  $('start-board').hidden = !board; $('over-board').hidden = !board;
 }
 
 function renderLegend() {
-  const part = (g, label) => `<span><i style="background:var(--${g.kind === 'best' ? 'best' : 'recent'})"></i>${label} ${g.score}</span>`;
-  $('legend').innerHTML = ghosts.map((g) => part(g, g.kind === 'best' ? 'Best' : 'Last')).join('');
+  $('legend').innerHTML = ghosts.map((g) => `<span><i style="background:${g.kind === 'best' ? PAL.captain : PAL.crew}"></i>${g.kind === 'best' ? 'Captain' : 'Last flight'} ${g.score}</span>`).join('');
 }
 
 function startRun(startX) {
   ghosts = ghostsNow();
   run = newRun(track, ghosts, startX);
-  target = run.x; acc = 0; state = 'playing';
+  target = run.x; acc = 0; state = 'playing'; runToken++;
   $('start').hidden = true; $('over').hidden = true;
   $('score').textContent = '0';
   renderLegend();
   sound.unlock();
 }
 
+const WHY = { ghost: 'The crew caught up with you.', snail: 'The aliens got you.', bar: 'You hit the wreckage.', timeout: 'Four minutes in the wreckage. Remarkable.' };
+
 function endRun() {
-  state = 'dying'; overAt = clock + 0.6; shake = 1;
+  state = 'dying'; overAt = clock + 0.7; shake = 1; flash = { c: '255,200,120', a: 0.5 };
   const prevBest = bestScore();
   const isBest = run.score > prevBest;
   if (run.score > 0) store = recordRun(store, seed, { s: run.score, x: encodeXs(run.xs), t: Date.now() });
   saveStore(store);
-  burst(sx(run.x), sy(PY), theme.you, 26);
-  if (run.cause === 'ghost' && run.hitGhost) burst(sx(ghostX(run.hitGhost, run.tick) ?? run.x), sy(PY), run.hitGhost.kind === 'best' ? theme.best : theme.recent, 16);
+  burst(sx(run.x), sy(PY), '#ffd9a0', 30);
   sound.die(); navigator.vibrate?.(60);
-  const seconds = run.tick / 60;
-  $('over-score').textContent = run.score;
-  $('over-bars').textContent = run.passed; $('over-grazes').textContent = run.grazes; $('over-time').textContent = seconds.toFixed(1);
-  $('over-flag').textContent = isBest && run.score > 0 ? 'New best' : '';
-  $('over-why').textContent = run.cause === 'ghost'
-    ? `You ran into your ${run.hitGhost.kind === 'best' ? 'best' : 'last'} run.`
-    : run.cause === 'bar' ? 'You hit a bar.' : 'You lasted four minutes. Impressive.';
-  const best = Math.max(prevBest, run.score);
-  $('board').textContent = `${boardLabel(seed)} · best ${best}`;
+  const bars = run.passed, grazes = run.grazes, friends = run.friends, seconds = run.tick / 60, score = run.score, xs = run.xs, cause = run.cause;
+  $('over-score').textContent = score; $('over-bars').textContent = bars; $('over-grazes').textContent = grazes;
+  $('over-time').textContent = seconds.toFixed(1); $('over-friends').textContent = friends;
+  $('over-friends-s').lastChild.nodeValue = friends === 1 ? ' helper' : ' helpers';
+  $('over-flag').textContent = isBest && score > 0 ? 'New best' : '';
+  $('over-why').textContent = WHY[cause] ?? '';
+  $('over-rank').hidden = true;
+  $('board').textContent = `${boardLabel(seed)} · best ${Math.max(prevBest, score)}`;
+  if (board && score > 0) postAndRank({ s: score, bars, grazes, ticks: xs.length, x: encodeXs(xs) }, runToken);
+}
+
+async function postAndRank(res, token) {
+  const out = await board.post(seed, res);
+  if (token !== runToken || state === 'playing') return;
+  let text = '';
+  if (out.reason === 'read-only') text = 'You can see the leaderboard but not post. Ask the owner for Contributor access.';
+  else if (isDaily(seed)) {
+    const rows = await board.rows('today');
+    if (token !== runToken || state === 'playing') return;
+    if (rows.mine) text = rows.mine.rank ? `You are #${rows.mine.rank} today.` : `Your best today is ${rows.mine.s}.`;
+  } else text = 'Practice board: scores are not posted.';
+  $('over-rank').textContent = text; $('over-rank').hidden = !text;
 }
 
 function showOver() {
-  state = 'over';
-  ghosts = ghostsNow(); renderLegend();
+  state = 'over'; ghosts = ghostsNow(); renderLegend();
   $('over').hidden = false; overAt = clock + 0.35; // brief lock so a panicked tap does not skip the result
+}
+
+// ---------- the opening scene ----------
+
+function startIntro() {
+  state = 'intro'; introT = 0; introGuard = clock + 0.4;
+  $('start').hidden = true; $('over').hidden = true; $('hud').hidden = true; $('legend').hidden = true; setChips(null);
+  $('caption').hidden = false; $('skip').hidden = false;
+  sound.unlock();
+}
+function endIntro() {
+  store.introSeen = true; saveStore(store);
+  showReady();
 }
 
 // ---------- input ----------
 
-function pointerX(e) {
-  const r = stage.getBoundingClientRect();
-  return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-}
+const pointerX = (e) => { const r = stage.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+const sheetOpen = () => !$('sheet-board').hidden || !$('sheet-guide').hidden;
+
 stage.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('button')) return;
+  if (e.target.closest('button') || sheetOpen()) return;
   const x = pointerX(e);
+  if (state === 'intro') { if (clock >= introGuard) endIntro(); return; }
   if (state === 'ready') startRun(x);
   else if (state === 'over' && clock >= overAt) startRun(x);
   else if (state === 'playing') target = x;
@@ -130,16 +158,14 @@ stage.addEventListener('pointerdown', (e) => {
 stage.addEventListener('pointermove', (e) => { if (state === 'playing' && e.buttons !== 0) target = pointerX(e); });
 
 const keys = new Set();
+const begin = () => { if (sheetOpen()) return; if (state === 'ready') startRun(0.5); else if (state === 'over' && clock >= overAt) startRun(0.5); else if (state === 'intro' && clock >= introGuard) endIntro(); };
 addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft' || e.key === 'a') keys.add('l');
   else if (e.key === 'ArrowRight' || e.key === 'd') keys.add('r');
-  else if (e.key === ' ' || e.key === 'Enter') {
-    if (state === 'ready') startRun(0.5);
-    else if (state === 'over' && clock >= overAt) startRun(0.5);
-    e.preventDefault(); return;
-  } else return;
-  if (state === 'ready') startRun(0.5);
-  else if (state === 'over' && clock >= overAt) startRun(0.5);
+  else if (e.key === ' ' || e.key === 'Enter') { if (e.target.closest?.('button')) return; begin(); e.preventDefault(); return; }
+  else if (e.key === 'Escape') { closeSheets(); return; }
+  else return;
+  begin();
   keyDir = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
 });
 addEventListener('keyup', (e) => {
@@ -149,6 +175,8 @@ addEventListener('keyup', (e) => {
 });
 
 $('again').addEventListener('click', () => { if (clock >= overAt) startRun(0.5); });
+$('skip').addEventListener('click', () => { if (state === 'intro') endIntro(); });
+$('start-intro').addEventListener('click', startIntro);
 const newBoard = () => setBoard(1 + Math.floor(Math.random() * 999999));
 $('start-new').addEventListener('click', newBoard);
 $('over-new').addEventListener('click', newBoard);
@@ -159,130 +187,246 @@ $('sound').addEventListener('click', () => {
   if (store.sound !== false) sound.pass();
 });
 
+// ---------- sheets: leaderboard and field guide ----------
+
+function closeSheets() { $('sheet-board').hidden = true; $('sheet-guide').hidden = true; }
+for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', closeSheets);
+for (const id of ['sheet-board', 'sheet-guide']) $(id).addEventListener('pointerdown', (e) => { if (e.target.id === id) closeSheets(); });
+
+function openBoard() { if (!board) return; $('sheet-board').hidden = false; $('my-handle').textContent = store.handle; renderBoard(); }
+$('start-board').addEventListener('click', openBoard);
+$('over-board').addEventListener('click', openBoard);
+for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => {
+  boardScope = t.dataset.scope;
+  document.querySelectorAll('.tab').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
+  renderBoard();
+});
+$('reroll').addEventListener('click', async () => {
+  store.handle = randomHandle(); saveStore(store);
+  $('my-handle').textContent = store.handle;
+  await board?.rename(store.handle);
+  renderBoard();
+});
+
+let boardTicket = 0;
+async function renderBoard() {
+  const ticket = ++boardTicket;
+  const status = board.status;
+  const list = $('board-rows');
+  $('board-status').textContent = status === 'loading' ? 'Loading…' : status === 'slow' ? 'Can’t reach the leaderboard yet.' : status === 'error' ? 'The leaderboard isn’t available right now.' : '';
+  if (status !== 'ready') return;
+  const out = await board.rows(boardScope);
+  if (ticket !== boardTicket) return;
+  list.textContent = '';
+  const add = (e, label) => {
+    const li = document.createElement('li');
+    if (e.uid === board.uid) li.className = 'me';
+    const rk = document.createElement('span'); rk.className = 'rk'; rk.textContent = label;
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = e.handle;
+    const ok = document.createElement('span'); ok.className = 'ok'; ok.textContent = '✓'; ok.title = 'Checked by replay'; nm.append(ok);
+    const sc = document.createElement('span'); sc.className = 'sc'; sc.textContent = e.s;
+    li.append(rk, nm, sc); list.append(li);
+  };
+  for (const e of out.rows) add(e, `#${e.rank}`);
+  if (out.mine && !out.rows.some((e) => e.uid === out.mine.uid)) add(out.mine, '…');
+  $('board-status').textContent = !out.rows.length ? 'No scores yet. Be the first.' : !board.canWrite ? 'View only. Ask the owner for Contributor access to post scores.' : '';
+}
+
+// A short field guide, drawn with the same art as the game.
+function guideIcon(draw) {
+  const c = document.createElement('canvas'); c.width = 68; c.height = 68;
+  const g = c.getContext('2d'); g.scale(2, 2); draw(g); return c;
+}
+function guideRow(list, icon, title, text) {
+  const li = document.createElement('li');
+  const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = title; const s = document.createElement('span'); s.textContent = text;
+  d.append(b, s); li.append(icon, d); list.append(li);
+}
+function buildGuide() {
+  const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
+  guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
+  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. The captain (gold) is your best run, the blue one your last. A touch costs a suit cell, then you get a safe moment.');
+  guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
+  guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Aliens', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide.');
+  const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
+  guideRow(aliens, shot('hammer'), 'Hammer', 'Fast and straight at where you were.');
+  guideRow(aliens, shot('jack'), 'Jacks', 'A fan of three slow spinning jacks. Slip between them.');
+  guideRow(aliens, shot('bomb'), 'Bomb', 'Lands, ticks for half a second, then blasts wide. Leave the circle.');
+  for (const kind of Object.keys(POWERS)) {
+    guideRow(powers, guideIcon((g) => { g.fillStyle = 'rgba(8,14,40,0.9)'; g.beginPath(); g.arc(17, 17, 15, 0, TAU); g.fill(); g.strokeStyle = tierColor(kind); g.lineWidth = 1.5; g.stroke(); drawIcon(g, kind, 17, 17, 8, tierColor(kind)); }),
+      `${POWER_NAME[kind]}${POWERS[kind].tier === 3 ? ' (rare)' : ''}`, POWER_HELP[kind]);
+  }
+}
+function openGuide() { $('sheet-guide').hidden = false; }
+$('guide-btn').addEventListener('click', openGuide);
+$('start-guide').addEventListener('click', openGuide);
+
+// ---------- hearts and chips ----------
+
+const heartEls = [...document.querySelectorAll('#hearts svg')];
+let heartsShown = -1;
+function setHearts(n) { if (n === heartsShown) return; heartsShown = n; heartEls.forEach((el, i) => el.classList.toggle('lost', i >= n)); }
+
+let chipKind = null;
+function paintChip(canvasId, kind) {
+  const c = $(canvasId), g = c.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 48, 48); g.scale(2, 2);
+  g.fillStyle = 'rgba(8,14,40,0.9)'; g.beginPath(); g.arc(12, 12, 11, 0, TAU); g.fill(); g.strokeStyle = tierColor(kind); g.lineWidth = 1.2; g.stroke();
+  drawIcon(g, kind, 12, 12, 6, tierColor(kind));
+}
+function setChips(r) {
+  const power = r?.power && r.powerLeft > 0 ? r.power : null;
+  $('chip-power').hidden = !power;
+  if (power) {
+    if (chipKind !== power) { chipKind = power; paintChip('chip-power-icon', power); $('chip-power-name').textContent = POWER_NAME[power]; }
+    $('chip-power-fill').style.width = `${Math.min(100, (100 * r.powerLeft) / POWERS[power].ticks)}%`;
+  } else chipKind = null;
+  const sh = r && r.bubble > 0;
+  if ($('chip-shield').hidden === sh) { $('chip-shield').hidden = !sh; if (sh) paintChip('chip-shield-icon', 'shield'); }
+  if (sh) $('chip-shield-fill').style.width = `${Math.min(100, (100 * r.bubble) / BUBBLE_TICKS)}%`;
+}
+
 // ---------- effects ----------
 
-function burst(x, y, color, n) {
+function burst(x, y, color, n, speed = 220) {
+  if (reduced) n = Math.ceil(n / 3);
   for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 220;
+    const a = Math.random() * TAU, s = 40 + Math.random() * speed;
     particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.4, max: 0.9, color });
   }
 }
+const say = (text, color = PAL.ink, dy = -34) => floaters.push({ x: sx(run.x), y: sy(PY) + dy, text, color, life: 1 });
 
 function handleEvents(events) {
   for (const e of events) {
     if (e === 'pass') { bump = 1; sound.pass(); }
-    if (e === 'graze') {
-      sound.graze(); navigator.vibrate?.(8);
-      floaters.push({ x: sx(run.x), y: sy(PY) - 26, text: 'graze +5', life: 0.8 });
-      burst(sx(run.x), sy(PY), theme.you, 6);
-    }
+    else if (e === 'graze') { sound.graze(); navigator.vibrate?.(8); say('graze', PAL.led, -26); burst(sx(run.x), sy(PY), PAL.led, 6); }
+    else if (e === 'hurt') { shake = Math.max(shake, 0.7); flash = { c: '255,77,94', a: 0.45 }; navigator.vibrate?.(40); sound.hurt(); say('−1 suit cell', PAL.warn); burst(sx(run.x), sy(PY), '#ff8a96', 14); }
+    else if (e === 'absorb') { sound.absorb(); flash = { c: '120,220,255', a: 0.25 }; say('absorbed', '#9fe6ff'); burst(sx(run.x), sy(PY), '#9fe6ff', 16); }
+    else if (e === 'bubble') { sound.power(); say('SHIELD', '#9fe6ff'); }
+    else if (e === 'heal') { sound.heal(); say('REPAIR', PAL.warn); burst(sx(run.x), sy(PY), '#ff8a96', 10); }
+    else if (e.startsWith('power:')) { const k = e.slice(6); sound.power(); say(POWER_NAME[k].toUpperCase(), tierColor(k)); burst(sx(run.x), sy(PY), tierColor(k), 14); }
+    else if (e === 'fire') sound.fire();
+    else if (e === 'boom') { sound.boom(); shake = Math.max(shake, 0.35); }
   }
 }
 
 // ---------- drawing ----------
 
-function drawBar(b) {
-  const y = sy(run ? run.D - b.d : 0 - b.d);
-  const h = BAR_T * scale;
-  if (y < -h || y > cssH + h) return;
-  let from = 0;
-  const seg = (a, z) => {
-    if (z - a < 0.002) return;
-    const x = sx(a), w = sx(z - a);
-    ctx.fillStyle = theme.bar;
-    ctx.beginPath(); ctx.roundRect(x, y - h / 2, w, h, h / 2.4); ctx.fill();
-    ctx.fillStyle = theme.edge; ctx.globalAlpha = 0.55;
-    ctx.fillRect(x + h / 3, y - h / 2 + 2, Math.max(0, w - (2 * h) / 3), 2); ctx.globalAlpha = 1;
-  };
-  for (const g of b.gaps) { seg(from, g.c - g.w / 2); from = g.c + g.w / 2; }
-  seg(from, W);
-}
-
-function drawGhost(g, tick, armed) {
-  const gx = ghostX(g, tick);
-  const col = g.kind === 'best' ? theme.best : theme.recent;
-  if (gx === null) return;
-  const x = sx(gx), y = sy(PY), r = PR * scale;
-  ctx.save();
-  ctx.globalAlpha = armed ? 0.8 : 0.4;
-  ctx.fillStyle = col;
-  ctx.beginPath(); ctx.arc(x, y, r * 0.95, 0, Math.PI * 2); ctx.fill();
-  ctx.globalAlpha = armed ? 0.35 : 0.8; ctx.strokeStyle = col; ctx.lineWidth = 2;
-  if (!armed) ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.arc(x, y, r * 1.45, 0, Math.PI * 2); ctx.stroke();
-  ctx.restore();
-}
-
-function draw(dt) {
+function drawGame(dt) {
+  const t = clock;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
   ctx.save();
-  if (shake > 0) ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 10 * shake);
-
-  // The row you live on, faintly.
-  ctx.strokeStyle = theme.muted; ctx.globalAlpha = 0.12; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(0, sy(PY)); ctx.lineTo(cssW, sy(PY)); ctx.stroke(); ctx.globalAlpha = 1;
-
+  if (shake > 0 && !reduced) ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 10 * shake);
   const D = run ? run.D : 0;
-  {
-    const topWorld = PY - baseY / scale - 0.2, botWorld = PY + (cssH - baseY) / scale + 0.2;
-    for (let i = Math.max(0, (run ? run.next : 0) - 2); i < (run ? run.next : 0) + 14; i++) {
-      const b = track.bar(i);
-      const y = D - b.d;
-      if (y > botWorld) continue;
-      if (y < topWorld) break;
-      drawBar(b);
+  const pw = run?.power ?? null;
+  drawSpace(ctx, cssW, cssH, stars, D * scale + t * 6, t);
+
+  // wreckage plates, with a gap list that Wide gaps stretches
+  const widen = pw === 'widen' ? WIDEN_MULT : 1;
+  const k = scale / 400;
+  const first = run ? Math.max(0, run.next - 2) : 0;
+  for (let i = first; run && i < first + 18; i++) { // no wreckage on the start screen
+    const b = track.bar(i);
+    const yb = D - b.d, y = sy(yb);
+    if (y < -60) break;
+    if (y > cssH + 60) continue;
+    let from = 0;
+    const h = BAR_T * scale;
+    for (const g of b.gaps) {
+      const a = Math.max(0, g.c - (g.w * widen) / 2), z = Math.min(1, g.c + (g.w * widen) / 2);
+      drawGirder(ctx, sx(from), sx(a), y, h, t); from = z;
+    }
+    drawGirder(ctx, sx(from), sx(1), y, h, t);
+    const sn = track.snail(i);
+    if (sn) {
+      const fireY = PY - FIRE_DIST;
+      const tele = yb < fireY ? Math.max(0, Math.min(1, (yb - (fireY - TELEGRAPH_DIST)) / TELEGRAPH_DIST)) : 0;
+      const recoil = yb >= fireY && yb < fireY + 0.15 ? 1 - (yb - fireY) / 0.15 : 0;
+      ctx.save(); ctx.translate(sx(sn.x), y - h / 2); ctx.scale(k, k);
+      drawAlien(ctx, 0, 0, { t, kind: sn.kind, tele, recoil, look: run ? Math.max(-1, Math.min(1, (run.x - sn.x) * 3)) : 0 });
+      ctx.restore();
     }
   }
 
+  // friendly crew spirits carrying helpers
+  if (run) for (let j = run.nf; j < run.nf + 3; j++) {
+    const f = track.friend(j), y = sy(D - f.d);
+    if (y < -70) break;
+    if (y > cssH + 70) continue;
+    drawFriend(ctx, sx(f.x), y, PR * scale, f.kind, t);
+  }
+
+  // alien shots
+  if (run) for (const s of run.shots) drawShot(ctx, s, sx(s.x), sy(s.y), scale, t);
+
+  // the dead crew: your earlier runs
   const tick = run ? run.tick : 1;
-  const armed = run ? run.tick > GRACE : false;
   const list = run ? run.ghosts : ghosts;
-  for (const g of list) drawGhost(g, run ? tick : 1, armed);
-  // A ghost's run ends in a ring where it fell.
-  if (run) for (const g of run.ghosts) {
-    if (ghostX(g, tick) === null && g.xs.length && tick - g.xs.length < 40 && tick > g.xs.length) {
-      const age = (tick - g.xs.length) / 40, x = sx(g.xs.at(-1) / 65535);
-      ctx.save(); ctx.globalAlpha = 0.6 * (1 - age); ctx.strokeStyle = g.kind === 'best' ? theme.best : theme.recent; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(x, sy(PY), PR * scale * (1 + age * 3), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  const px = (g, n) => { const a = ghostX(g, n), b = ghostX(g, n - 1); return a === null || b === null ? 0 : (a - b) * scale * 60; };
+  list.forEach((g, gi) => {
+    const gx = ghostX(g, tick);
+    if (gx === null) return;
+    const shat = run && run.shatteredUntil[gi] > tick ? (run.shatteredUntil[gi] - tick) / SHATTER_TICKS : 0;
+    drawCrew(ctx, sx(gx), sy(PY), PR * scale, {
+      t, kind: g.kind, armed: run ? tick > GRACE : false, shattered: shat, vx: px(g, tick),
+      near: run ? Math.abs(gx - run.x) < 0.14 : false, fade: pw === 'exorcise' ? 0.22 : 1,
+    });
+    if (pw === 'foresight') { // where this crew member will be as the wreckage arrives
+      ctx.save();
+      for (let n = 8; n <= 96; n += 8) {
+        const fx = ghostX(g, tick + n);
+        if (fx === null) break;
+        const y = sy(PY) - n * speedAt(D) * TICK * scale;
+        ctx.globalAlpha = 0.55 * (1 - n / 110); ctx.fillStyle = g.kind === 'best' ? PAL.captain : PAL.crew;
+        ctx.beginPath(); ctx.arc(sx(fx), y, 3, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
     }
-  }
+  });
 
-  // You, with a short trail.
-  if (run && state !== 'dying' && state !== 'over') {
-    const n = Math.min(16, run.xs.length);
-    for (let i = n; i >= 1; i--) {
-      const x = run.xs[run.xs.length - i] / 65535;
-      ctx.globalAlpha = 0.28 * (1 - i / (n + 1));
-      ctx.fillStyle = theme.you;
-      ctx.beginPath(); ctx.arc(sx(x), sy(PY) + i * 1.5, PR * scale * (1 - i / 30), 0, Math.PI * 2); ctx.fill();
+  // you
+  if (run && state !== 'over') {
+    const n = run.xs.length;
+    const vx = n > 1 ? ((run.xs[n - 1] - run.xs[n - 2]) / 65535) * scale * 60 : 0;
+    const dead = state === 'dying';
+    if (dead) ctx.globalAlpha = Math.max(0, 1 - (clock - (overAt - 0.7)) / 0.45);
+    if (pw === 'nitro' && !reduced) { // speed streaks
+      ctx.save(); ctx.strokeStyle = 'rgba(255,190,120,0.35)'; ctx.lineWidth = 1.5;
+      for (let i = 0; i < 9; i++) { const x = ((i * 53 + t * 700) % cssW), y = (i * 97 + t * 500) % cssH; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 26); ctx.stroke(); }
+      ctx.restore();
     }
+    if (pw === 'exorcise') { ctx.save(); ctx.strokeStyle = `rgba(255,255,255,${0.25 + 0.2 * Math.sin(t * 8)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(run.x), sy(PY), PR * scale * (2.4 + 0.4 * Math.sin(t * 6)), 0, TAU); ctx.stroke(); ctx.restore(); }
+    if (pw === 'gold' && !reduced) { ctx.save(); ctx.fillStyle = PAL.captain; for (let i = 0; i < 4; i++) { const a = t * 3 + i * 1.6; ctx.globalAlpha = 0.8; ctx.fillRect(sx(run.x) + Math.cos(a) * 22 - 1.5, sy(PY) + Math.sin(a * 1.3) * 16 - 1.5, 3, 3); } ctx.restore(); }
+    drawBot(ctx, sx(run.x), sy(PY), PR * scale, {
+      t, vx, power: pw, bubble: run.bubble, blink: run.shield > 0 || run.invuln > 0, scared: run.shield > 0, dead,
+      scale: pw === 'shrink' ? 0.6 : 1,
+    });
     ctx.globalAlpha = 1;
-    ctx.fillStyle = theme.you;
-    ctx.beginPath(); ctx.arc(sx(run.x), sy(PY), PR * scale, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = theme.field; ctx.lineWidth = 3; ctx.stroke();
-  } else if (state === 'ready') {
-    ctx.fillStyle = theme.you; ctx.globalAlpha = 0.5;
-    ctx.beginPath(); ctx.arc(sx(0.5), sy(PY), PR * scale, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+  } else if (state === 'ready' || state === 'boot') {
+    drawBot(ctx, sx(0.5), sy(PY), PR * scale, { t, vx: 0 });
   }
 
-  // Particles and floating text.
+  // particles and floating words
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.life -= dt; if (p.life <= 0) { particles.splice(i, 1); continue; }
     p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96;
     ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.color;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2.6, 0, TAU); ctx.fill();
   }
   ctx.globalAlpha = 1;
-  ctx.font = '500 12px "DM Mono", monospace'; ctx.textAlign = 'center';
+  ctx.font = '600 13px "DM Mono", monospace'; ctx.textAlign = 'center';
   for (let i = floaters.length - 1; i >= 0; i--) {
     const f = floaters[i];
     f.life -= dt; if (f.life <= 0) { floaters.splice(i, 1); continue; }
-    f.y -= 36 * dt; ctx.globalAlpha = Math.min(1, f.life * 2); ctx.fillStyle = theme.ink;
+    f.y -= 34 * dt; ctx.globalAlpha = Math.min(1, f.life * 2); ctx.fillStyle = f.color;
     ctx.fillText(f.text, f.x, f.y);
   }
   ctx.globalAlpha = 1;
+  if (pw === 'slowmo') { ctx.fillStyle = 'rgba(90,140,255,0.10)'; ctx.fillRect(-20, -20, cssW + 40, cssH + 40); }
+  if (flash.a > 0.01) { ctx.fillStyle = `rgba(${flash.c},${flash.a})`; ctx.fillRect(-20, -20, cssW + 40, cssH + 40); flash.a *= Math.pow(0.02, dt); }
   ctx.restore();
 }
 
@@ -291,32 +435,52 @@ function draw(dt) {
 function frame(ts) {
   const dt = Math.min(0.1, (ts - (last || ts)) / 1000);
   last = ts; clock += dt;
-  if (state === 'playing') {
-    acc += dt;
-    while (acc >= TICK && run.alive) {
-      if (keyDir) target = Math.min(1, Math.max(0, target + keyDir * 1.6 * TICK));
-      handleEvents(step(run, target));
-      acc -= TICK;
-    }
-    $('score').textContent = run.score;
-    const left = run.ghosts.length && run.tick < GRACE ? ((GRACE - run.tick) / 60).toFixed(1) : null;
-    $('status').textContent = left ? `ghosts wake in ${left}s` : (run.ghosts.length ? 'ghosts awake' : '');
-    if (!run.alive) endRun();
-  } else if (state === 'dying' && clock >= overAt) showOver();
-  shake = Math.max(0, shake - dt * 2.2);
-  if (bump > 0) { bump = Math.max(0, bump - dt * 6); $('score').classList.toggle('bump', bump > 0.4); }
-  draw(dt);
+  if (state === 'intro') {
+    introT += dt;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawIntro(ctx, cssW, cssH, introT, stars);
+    $('caption').textContent = captionAt(introT);
+    if (introT >= INTRO_LENGTH) endIntro();
+  } else {
+    if (state === 'playing') {
+      acc += dt;
+      while (acc >= TICK && run.alive) {
+        if (keyDir) target = Math.min(1, Math.max(0, target + keyDir * 1.6 * TICK));
+        handleEvents(step(run, target));
+        acc -= TICK;
+      }
+      $('score').textContent = run.score;
+      setHearts(run.hearts); setChips(run);
+      const wake = run.ghosts.length && run.tick < GRACE ? ((GRACE - run.tick) / 60).toFixed(1) : null;
+      $('status').textContent = wake ? `crew wakes in ${wake}s` : run.ghosts.length ? 'crew awake' : '';
+      if (!run.alive) endRun();
+    } else if (state === 'dying' && clock >= overAt) { setChips(null); showOver(); }
+    shake = Math.max(0, shake - dt * 2.2);
+    if (bump > 0) { bump = Math.max(0, bump - dt * 6); $('score').classList.toggle('bump', bump > 0.4); }
+    drawGame(dt);
+  }
   requestAnimationFrame(frame);
 }
 
 // ---------- boot ----------
 
-new ResizeObserver(() => layout()).observe(stage);
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
-new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-layout(); readTheme();
+new ResizeObserver(layout).observe(stage);
+layout();
+buildGuide();
 $('sound').setAttribute('aria-pressed', String(store.sound !== false));
-showReady();
+if (!store.introSeen && !reduced) startIntro(); else showReady();
 requestAnimationFrame(frame);
 
-if (dbg) window.__echoes = { get state() { return state; }, get run() { return run; }, get track() { return track; }, steer: (x) => { target = x; }, start: (x) => startRun(x), seed: () => seed };
+// The leaderboard exists only where the page has a shared database.
+connect().then((conn) => {
+  if (!conn) return;
+  board = createBoard(conn, { today: dailySeed, getHandle: () => store.handle });
+  board.start();
+  board.onChange(() => { if (!$('sheet-board').hidden) renderBoard(); });
+  $('start-board').hidden = false; $('over-board').hidden = false;
+});
+
+if (dbg) window.__echoes = {
+  get state() { return state; }, get run() { return run; }, get track() { return track; }, get board() { return board; },
+  steer: (x) => { target = x; }, start: (x) => startRun(x), seed: () => seed, skipIntro: () => endIntro(), introAt: (t) => { introT = t; },
+};

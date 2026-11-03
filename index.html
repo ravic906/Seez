@@ -8,26 +8,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: one portrait play field centred on the screen; a score on top and a card over it between runs. */
+/* Layout: one portrait play field centred on the screen. Score and suit cells on top, a power chip under them,
+   and cards or sheets over the field between runs. Space is dark by nature, so this is a single dark look. */
 :root {
-  --bg: #e9edf6; --field: #f4f6fb; --ink: #1d2540; --bar: #232c4a; --bar-edge: #4a5686;
-  --muted: #646f8e; --line: #cfd6e8; --card: #ffffff;
-  --you: #ff4d5e; --best: #e29f00; --recent: #2f7cf6;
+  --bg: #02030a; --field: #04060f; --ink: #e8eeff; --muted: #8f9bc0; --line: #243052; --card: rgba(10, 16, 40, .94);
+  --accent: #55e6ff; --warn: #ff4d5e; --gold: #ffd25a; --crew: #8fd0ff; --friend: #5ff0c0; --violet: #b58cff;
   --f-display: "Bricolage Grotesque", "Arial Narrow", system-ui, sans-serif;
   --f-mono: "DM Mono", ui-monospace, Menlo, Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0a0e1b; --field: #0f1527; --ink: #e6ebfa; --bar: #27315a; --bar-edge: #7d8fd0;
-    --muted: #8f9bc0; --line: #243052; --card: #161e38;
-    --you: #ff6b78; --best: #ffc233; --recent: #5ea0ff;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0a0e1b; --field: #0f1527; --ink: #e6ebfa; --bar: #27315a; --bar-edge: #7d8fd0;
-  --muted: #8f9bc0; --line: #243052; --card: #161e38;
-  --you: #ff6b78; --best: #ffc233; --recent: #5ea0ff;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -40,7 +27,7 @@ body {
   position: relative; height: 100%; width: min(100%, 480px); margin: 0 auto; background: var(--field);
   touch-action: none; overflow: hidden; border-inline: 1px solid var(--line);
 }
-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
 .hud {
   position: absolute; inset: 0 0 auto 0; top: 10px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 8px;
@@ -48,65 +35,161 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 }
 .board { font: 500 11px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding-top: 8px; min-width: 0; overflow-wrap: anywhere; }
 .score { text-align: center; }
-.score strong { display: block; font: 800 56px/1 var(--f-display); letter-spacing: -.02em; font-variant-numeric: tabular-nums; transition: transform .12s ease-out; }
+.score strong { display: block; font: 800 54px/1 var(--f-display); letter-spacing: -.02em; font-variant-numeric: tabular-nums; transition: transform .12s ease-out; text-shadow: 0 0 18px rgb(85 230 255 / .35); }
 .score strong.bump { transform: scale(1.14); }
 .score span { display: block; font: 500 11px var(--f-mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; min-height: 1.4em; }
-.tools { justify-self: end; pointer-events: auto; }
-.icon { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; display: grid; place-items: center; font-size: 17px; }
+.hearts { display: flex; justify-content: center; gap: 5px; margin-top: 2px; }
+.hearts svg { width: 18px; height: 18px; fill: var(--warn); filter: drop-shadow(0 0 5px rgb(255 77 94 / .6)); transition: opacity .2s, transform .2s; }
+.hearts svg.lost { fill: #3a4468; opacity: .6; filter: none; transform: scale(.82); }
+.tools { justify-self: end; pointer-events: auto; display: flex; gap: 8px; }
+.icon { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; display: grid; place-items: center; font: 800 16px var(--f-display); }
 .icon[aria-pressed="false"] { color: var(--muted); }
+
+.chips { position: absolute; left: 0; right: 0; top: calc(max(10px, env(safe-area-inset-top, 0px)) + 112px); display: flex; justify-content: center; gap: 8px; pointer-events: none; padding-inline: 16px; }
+.chip { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 5px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font: 500 12px var(--f-mono); letter-spacing: .04em; text-transform: uppercase; }
+.chip canvas { width: 24px; height: 24px; }
+.chip i { display: block; width: 46px; height: 4px; border-radius: 3px; background: #1a2342; overflow: hidden; }
+.chip b { display: block; height: 100%; background: var(--accent); width: 100%; }
+
 .legend { position: absolute; left: 0; right: 0; bottom: 14px; display: flex; justify-content: center; gap: 16px; font: 500 11px var(--f-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); pointer-events: none; padding-inline: 16px; flex-wrap: wrap; }
-.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+
+.caption {
+  position: absolute; left: 0; right: 0; bottom: 14%; text-align: center; padding-inline: 24px; font: 600 19px/1.3 var(--f-display);
+  text-shadow: 0 2px 12px #000; text-wrap: balance; pointer-events: none;
+}
+.skip { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 18px; background: rgb(10 16 40 / .7); color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font: 500 12px var(--f-mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
 
 .card {
-  position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); width: min(88%, 340px);
-  background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px 20px 18px; text-align: center;
-  box-shadow: 0 18px 50px rgb(10 15 40 / .22); display: flex; flex-direction: column; gap: 12px;
+  position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); width: min(90%, 350px);
+  background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px 20px 16px; text-align: center;
+  box-shadow: 0 18px 60px rgb(0 0 0 / .6), 0 0 0 1px rgb(85 230 255 / .06); display: flex; flex-direction: column; gap: 11px; backdrop-filter: blur(4px);
 }
-.card h1 { margin: 0; font: 800 44px/1 var(--f-display); letter-spacing: -.02em; }
-.card p { margin: 0; color: var(--muted); font-size: 15px; text-wrap: balance; }
-.card .big { font: 800 64px/1 var(--f-display); font-variant-numeric: tabular-nums; color: var(--ink); }
-.card .flag { font: 500 12px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--best); }
-.card .stats { display: flex; justify-content: center; gap: 18px; font: 500 12px var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.card h1 { margin: 0; font: 800 46px/1 var(--f-display); letter-spacing: -.02em; text-shadow: 0 0 22px rgb(85 230 255 / .4); }
+.card p { margin: 0; color: var(--muted); font-size: 14.5px; text-wrap: balance; }
+.card .big { font: 800 64px/1 var(--f-display); font-variant-numeric: tabular-nums; }
+.card .flag { font: 500 12px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--gold); min-height: 1.2em; }
+.card .stats { display: flex; justify-content: center; gap: 16px; font: 500 12px var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; flex-wrap: wrap; }
 .card .stats b { color: var(--ink); font-weight: 500; }
-.cta { font: 800 17px var(--f-display); color: #fff; background: var(--you); border: 0; border-radius: 12px; padding: 13px 16px; cursor: pointer; }
+.hint { color: var(--ink) !important; font-weight: 600; }
+.cta { font: 800 17px var(--f-display); color: #04101a; background: var(--accent); border: 0; border-radius: 12px; padding: 13px 16px; cursor: pointer; box-shadow: 0 0 22px rgb(85 230 255 / .35); }
 .cta:active { transform: translateY(1px); }
-.links { display: flex; justify-content: center; gap: 18px; }
+.links { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
 .link { background: none; border: 0; color: var(--muted); font: 500 12px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; cursor: pointer; padding: 6px 2px; text-decoration: underline; text-underline-offset: 3px; }
-:focus-visible { outline: 2px solid var(--recent); outline-offset: 2px; }
+.link:hover { color: var(--ink); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
-.hint { color: var(--ink); font-weight: 600; }
-@media (prefers-reduced-motion: reduce) { .score strong { transition: none; } }
+
+.sheet { position: absolute; inset: 0; background: rgb(2 3 10 / .82); display: grid; place-items: center; padding: 16px; z-index: 5; backdrop-filter: blur(3px); }
+.panel { width: min(100%, 420px); max-height: 100%; overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.panel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.panel h2 { margin: 0; font: 800 26px var(--f-display); letter-spacing: -.01em; }
+.tabs { display: flex; gap: 6px; }
+.tab { flex: 1; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 500 12px var(--f-mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--accent); color: #04101a; border-color: var(--accent); }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rows li { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 8px; align-items: center; padding: 7px 10px; border-radius: 10px; background: rgb(255 255 255 / .03); font-size: 15px; }
+.rows li.me { background: rgb(85 230 255 / .14); outline: 1px solid rgb(85 230 255 / .4); }
+.rows .rk { font: 500 13px var(--f-mono); color: var(--muted); }
+.rows .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rows .sc { font: 600 15px var(--f-mono); font-variant-numeric: tabular-nums; }
+.rows .ok { color: var(--friend); margin-left: 6px; font-size: 12px; }
+.note { color: var(--muted); font-size: 13px; margin: 0; text-wrap: balance; }
+.name-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 500 12px var(--f-mono); color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.name-row b { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+
+.guide h3 { margin: 4px 0 0; font: 600 12px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.guide ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.guide li { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; font-size: 14px; }
+.guide li canvas { width: 34px; height: 34px; }
+.guide li b { display: block; font-weight: 600; }
+.guide li span { color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .score strong, .hearts svg { transition: none; } }
 </style>
 <style id="standalone">
 .hud { top: max(10px, env(safe-area-inset-top, 0px)); }
+.chips { top: calc(max(10px, env(safe-area-inset-top, 0px)) + 112px); }
 .legend { bottom: max(14px, env(safe-area-inset-bottom, 0px)); }
 </style>
 </head>
 <body>
 <div class="stage" id="stage">
-  <canvas id="cv" aria-label="Game field. Slide your thumb left and right to steer."></canvas>
+  <canvas id="cv" aria-label="Game field. Slide your thumb left and right to steer the rescue bot."></canvas>
 
-  <div class="hud">
+  <div class="hud" id="hud">
     <div class="board" id="board"></div>
-    <div class="score"><strong id="score">0</strong><span id="status"></span></div>
-    <div class="tools"><button class="icon" id="sound" type="button" aria-pressed="true" aria-label="Sound">♪</button></div>
+    <div class="score">
+      <strong id="score">0</strong>
+      <div class="hearts" id="hearts" aria-label="Suit cells">
+        <svg viewBox="0 0 24 24"><path d="M12 21s-7-4.6-9.3-9C.7 8.5 2.5 4 6.4 4c2 0 3.6 1 5.6 3 2-2 3.6-3 5.6-3 3.9 0 5.7 4.5 3.7 8-2.3 4.4-9.3 9-9.3 9z"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M12 21s-7-4.6-9.3-9C.7 8.5 2.5 4 6.4 4c2 0 3.6 1 5.6 3 2-2 3.6-3 5.6-3 3.9 0 5.7 4.5 3.7 8-2.3 4.4-9.3 9-9.3 9z"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M12 21s-7-4.6-9.3-9C.7 8.5 2.5 4 6.4 4c2 0 3.6 1 5.6 3 2-2 3.6-3 5.6-3 3.9 0 5.7 4.5 3.7 8-2.3 4.4-9.3 9-9.3 9z"/></svg>
+      </div>
+      <span id="status"></span>
+    </div>
+    <div class="tools">
+      <button class="icon" id="guide-btn" type="button" aria-label="Field guide">?</button>
+      <button class="icon" id="sound" type="button" aria-pressed="true" aria-label="Sound">♪</button>
+    </div>
+  </div>
+
+  <div class="chips" id="chips">
+    <div class="chip" id="chip-power" hidden><canvas id="chip-power-icon" width="48" height="48"></canvas><span id="chip-power-name"></span><i><b id="chip-power-fill"></b></i></div>
+    <div class="chip" id="chip-shield" hidden><canvas id="chip-shield-icon" width="48" height="48"></canvas><span>Shield</span><i><b id="chip-shield-fill"></b></i></div>
   </div>
   <div class="legend" id="legend"></div>
 
-  <section class="card" id="start">
+  <div class="caption" id="caption" hidden></div>
+  <button class="skip" id="skip" type="button" hidden>Skip</button>
+
+  <section class="card" id="start" hidden>
     <h1>Echoes</h1>
-    <p>Slide your thumb to pass through the gaps. Every run comes back as a <b>ghost</b>. Don’t touch it.</p>
+    <p>Your ship is gone. You are the last one alive. Slide through the wreckage. Every run you fly comes back as a crew ghost, still flying your route. Don’t touch it.</p>
     <p class="hint" id="start-hint">Touch anywhere to start.</p>
-    <div class="links"><button class="link" id="start-new" type="button">New board</button></div>
+    <div class="links">
+      <button class="link" id="start-board" type="button" hidden>Leaderboard</button>
+      <button class="link" id="start-guide" type="button">Field guide</button>
+      <button class="link" id="start-intro" type="button">Watch intro</button>
+      <button class="link" id="start-new" type="button">New board</button>
+    </div>
   </section>
 
   <section class="card" id="over" hidden>
     <div class="flag" id="over-flag"></div>
     <div class="big" id="over-score">0</div>
-    <div class="stats"><span><b id="over-bars">0</b> bars</span><span><b id="over-grazes">0</b> grazes</span><span><b id="over-time">0</b> s</span></div>
+    <div class="stats"><span><b id="over-bars">0</b> bars</span><span><b id="over-grazes">0</b> grazes</span><span><b id="over-time">0</b> s</span><span id="over-friends-s"><b id="over-friends">0</b> helpers</span></div>
     <p id="over-why"></p>
-    <button class="cta" id="again" type="button">Go again</button>
-    <div class="links"><button class="link" id="over-new" type="button">New board</button><button class="link" id="over-daily" type="button">Daily board</button></div>
+    <p class="note" id="over-rank" hidden></p>
+    <button class="cta" id="again" type="button">Fly again</button>
+    <div class="links">
+      <button class="link" id="over-board" type="button" hidden>Leaderboard</button>
+      <button class="link" id="over-new" type="button">New board</button>
+      <button class="link" id="over-daily" type="button">Daily board</button>
+    </div>
+  </section>
+
+  <section class="sheet" id="sheet-board" hidden>
+    <div class="panel">
+      <header><h2>Survivors</h2><button class="link" data-close type="button">Close</button></header>
+      <div class="tabs" role="tablist"><button class="tab" role="tab" data-scope="today" aria-selected="true">Today</button><button class="tab" role="tab" data-scope="week" aria-selected="false">This week</button></div>
+      <p class="note" id="board-status"></p>
+      <ol class="rows" id="board-rows"></ol>
+      <div class="name-row"><span>You fly as <b id="my-handle"></b></span><button class="link" id="reroll" type="button">New callsign</button></div>
+      <p class="note">Callsigns are random. Every score is checked by replaying the run, so only real flights are listed.</p>
+    </div>
+  </section>
+
+  <section class="sheet" id="sheet-guide" hidden>
+    <div class="panel guide">
+      <header><h2>Field guide</h2><button class="link" data-close type="button">Close</button></header>
+      <h3>The wreckage</h3>
+      <ul id="guide-basics"></ul>
+      <h3>Aliens</h3>
+      <ul id="guide-aliens"></ul>
+      <h3>Helpers (left by friendly crew spirits)</h3>
+      <p class="note">Better helpers turn up the further you fly. Only one timed helper works at a time.</p>
+      <ul id="guide-powers"></ul>
+    </div>
   </section>
 </div>
 

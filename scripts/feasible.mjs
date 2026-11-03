@@ -1,4 +1,5 @@
-// Is a long run even possible? Search every reachable x, tick by tick (perfect play).
+// Strict check: is a run with ZERO ghost touches possible? Search every reachable x, tick by tick.
+// (It ignores hearts, powers and snails, so it is a lower bound: the real game is more forgiving.)
 import { makeTrack, pickGhosts, ghostX, gapMargin, speedAt, TICK, PY, PR, GR, LAT, GRACE, BAR_T } from '../src/core.js';
 import { playBot } from './bot.mjs';
 
@@ -41,5 +42,5 @@ if (process.argv[1].endsWith('feasible.mjs')) {
       runs.push({ xs: r.xs, score: r.score });
     }
   }
-  out.forEach((r, i) => console.log(`${i} ghosts: perfect play survives median ${median(r).toFixed(1)}s (min ${Math.min(...r).toFixed(1)}, max ${Math.max(...r).toFixed(1)}), cap 60s`));
+  out.forEach((r, i) => console.log(`${i} ghosts: a zero-touch run survives median ${median(r).toFixed(1)}s (min ${Math.min(...r).toFixed(1)}, max ${Math.max(...r).toFixed(1)}), cap 60s`));
 }
