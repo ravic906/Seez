@@ -2,8 +2,22 @@
 // some shake, steers for the middle of the next gap and, when ghosts are about, picks the
 // spot in the gap that is free of ghosts when the bar arrives.
 import {
-  TICK, PY, PR, GR, LAT, GRACE, speedAt, newRun, step, mulberry32, ghostX,
+  TICK, PY, PR, GR, LAT, GRACE, BLAST_R, speedAt, newRun, step, mulberry32, ghostX,
 } from '../src/core.js';
+
+// How dangerous standing at x is, given the shots in flight (0 = safe, 1 = about to be hit).
+export function shotDanger(run, x) {
+  let d = 0;
+  for (const s of run.shots) {
+    if (s.kind === 'bomb' && s.mode !== 'fly') { if (Math.abs(x - s.x) < BLAST_R + PR + 0.05) d = 1; continue; }
+    const t = (PY - s.y) / s.vy;
+    if (t < -0.1 || t > 1.1) continue;
+    const cx = s.x + s.vx * Math.max(0, t);
+    const reach = (s.kind === 'bomb' ? BLAST_R : s.r) + PR + 0.05;
+    if (Math.abs(x - cx) < reach) d = 1;
+  }
+  return d;
+}
 
 export function playBot(track, ghosts, { seed = 1, shake = 0.012, reaction = 9, lookahead = true, maxTicks = 60 * 150 } = {}) {
   const rng = mulberry32(seed * 7919 + 13);
@@ -36,8 +50,8 @@ export function playBot(track, ghosts, { seed = 1, shake = 0.012, reaction = 9, 
           }
         }
         const travel = Math.abs(cand - run.x) / (LAT * TICK);
-        const feasible = travel <= eta ? 0 : -(travel - eta) * 0.02;
-        const score = Math.min(clear, 0.06) * 10 + feasible - Math.abs(cand - run.x) * 0.15;
+        const feasible = travel <= eta ? 0 : -50; // a gap you cannot reach in time is worse than any shot
+        const score = Math.min(clear, 0.06) * 10 + feasible - Math.abs(cand - run.x) * 0.15 - shotDanger(run, cand) * 3;
         if (score > bestScore) { bestScore = score; best = cand; }
       }
       target = best + (rng() * 2 - 1) * shake;
