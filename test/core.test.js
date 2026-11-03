@@ -4,7 +4,7 @@ import {
   makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
   NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GOLD_MULT,
-  TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
+  TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_STAY_BOTH, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
 
@@ -426,7 +426,8 @@ test('the crew visit on a schedule: first after 10 to 15 s, staying 12 to 18 s, 
     assert.ok(w[0].start >= FIRST_VISIT[0] && w[0].start <= FIRST_VISIT[1], `first visit at ${w[0].start}`);
     for (let i = 0; i < w.length; i++) {
       const stay = w[i].end - w[i].start;
-      assert.ok(stay >= VISIT_STAY[0] && stay <= VISIT_STAY[1], `stay ${stay}`);
+      const [lo, hi] = w[i].mode === 'both' ? VISIT_STAY_BOTH : VISIT_STAY;
+      assert.ok(stay >= lo && stay <= hi, `${w[i].mode} stay ${stay}`);
       if (i) { const away = w[i].start - w[i - 1].end; assert.ok(away >= VISIT_AWAY[0] && away <= VISIT_AWAY[1], `away ${away}`); }
     }
     assert.ok(w.at(-1).end > MAX_TICKS - 3000, 'visits continue through a long run');
@@ -655,4 +656,44 @@ test('a replay judges the aliens: a run that ignores every shot does not verify,
   }
   const sparse = new Array(50); sparse[0] = 32768; sparse[49] = 32768;
   assert.equal(verifyRun(500005, sparse).ok, false, 'holes in the list are not accepted');
+});
+
+test('Slow-mo cannot pull the crew visits or patches away from the bars they were laid out for', () => {
+  for (const seed of [3, 5, 20261103]) {
+    const track = makeTrack(seed);
+    const run = newRun(track, [], 0.5);
+    run.lenient = true;
+    let checked = 0, k = 0;
+    while (run.alive && run.tick < 14400 && k < 120) {
+      run.power = 'slowmo'; run.powerLeft = 999; // slow the whole way
+      step(run, track.bar(run.next).c);
+      const b = track.bar(k);
+      if (run.D >= b.d + PY) { assert.deepEqual(track.phaseAtTick(run.pt), b.phase, `seed ${seed} bar ${k}`); checked++; k++; }
+    }
+    assert.ok(checked > 60, 'checked a long stretch');
+    assert.ok(new Set(Array.from({ length: 120 }, (_, i) => track.bar(i).phase.kind)).size >= 3, 'and it crossed more than one kind of stretch');
+  }
+});
+
+test('tight patches throw no hammers, and every tight bar that had a weapon in it is still dodgeable', () => {
+  let tightSnails = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const t = makeTrack(seed);
+    for (let i = 0; i < 200; i++) {
+      const sn = t.snail(i);
+      if (sn && t.bar(i).tough) { tightSnails++; assert.notEqual(sn.kind, 'hammer', `seed ${seed} bar ${i}`); }
+    }
+  }
+  assert.ok(tightSnails > 0, 'some tight bars do carry aliens');
+  assert.equal(weaponWeight('hammer', 50, true), 0);
+  assert.ok(weaponWeight('hammer', 50, false) > 0);
+});
+
+test('the fall speed ramps up over about 23 seconds', () => {
+  assert.equal(speedAt(0), 0.6);
+  assert.equal(speedAt(20), 1.2);
+  const D = dAfter(60 * 24);
+  assert.equal(speedAt(D), 1.2, 'at the top speed after 24 s');
+  assert.ok(speedAt(dAfter(60 * 21)) < 1.2, 'not quite there at 21 s');
+  assert.ok(speedAt(dAfter(60 * 10)) < 1.0, 'still well short of it after 10 s');
 });

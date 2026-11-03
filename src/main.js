@@ -264,7 +264,7 @@ function guideRow(list, icon, title, text) {
 function buildGuide() {
   const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
-  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15, then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. A touch costs a suit cell, then you get a safe moment.');
+  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. A touch costs a suit cell, then you get a safe moment.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Alien snails', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
@@ -390,7 +390,7 @@ function drawGame(dt) {
     const gx = ghostX(g, tick);
     if (gx === null) return;
     if (!run) return;                                  // on the start screen nobody is out here yet
-    const ph = ghostPhase(track, list.length, gi, tick);
+    const ph = ghostPhase(track, list.length, gi, run.pt);
     if (!ph.visible) return;                           // this one is not visiting right now
     const shat = run && run.shatteredUntil[gi] > tick ? (run.shatteredUntil[gi] - tick) / SHATTER_TICKS : 0;
     drawCrew(ctx, sx(gx), sy(PY), PR * scale, {
@@ -456,11 +456,11 @@ function drawGame(dt) {
 
 // What is after you right now, so there is always something to read on screen.
 function threatLabel(r) {
-  const ph = r.track.phaseAtTick(r.tick);
+  const ph = r.track.phaseAtTick(r.pt);
   if (ph.kind === 'early') return 'aliens in the wreckage';
   if (ph.kind === 'patch') return ph.patch === 'tough' ? 'tight wreckage' : 'alien nest';
   if (!r.ghosts.length) return 'the crew is quiet';
-  const g = r.ghosts.map((_, i) => ghostPhase(r.track, r.ghosts.length, i, r.tick));
+  const g = r.ghosts.map((_, i) => ghostPhase(r.track, r.ghosts.length, i, r.pt));
   return g.some((x) => x.visible && !x.armed) ? 'the crew is waking' : 'the crew is after you';
 }
 

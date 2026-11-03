@@ -24,6 +24,7 @@ export const MAX_GHOSTS = 2;  // your best run and your last run
 // an alien nest or a tight patch of wreckage. Early on a few aliens keep you busy.
 export const FIRST_VISIT = [600, 900];
 export const VISIT_STAY = [720, 1080];
+export const VISIT_STAY_BOTH = [480, 720]; // two ghosts at once is the hardest moment, so it is shorter: 8 to 12 s
 export const VISIT_AWAY = [720, 1080];
 export const JOIN_GRACE = 90;      // a visiting ghost needs 1.5 s to wake before it can touch you
 export const LEAVE_GRACE = 45;     // and cannot touch you for its last 0.75 s as it fades
@@ -87,9 +88,10 @@ export const BLAST_TICKS = 8;
 export const BLAST_R = 0.13;
 export const JACK_SPREAD = 0.32;    // sideways speed difference between the three jacks
 
-export function weaponWeight(kind, bar) {
+export function weaponWeight(kind, bar, tough = false) {
   const w = WEAPONS[kind];
   if (bar < w.from) return 0;
+  if (tough && kind === 'hammer') return 0; // too quick to dodge in the narrow gaps of a tight patch
   const p = Math.min(1, bar / 120);
   return w.weight * (kind === 'hammer' ? 1 - 0.5 * p : kind === 'jacks' ? 0.7 + 0.6 * p : 0.5 + p);
 }
@@ -112,7 +114,7 @@ export function mulberry32(seed) {
 }
 
 // Fall speed (world units per second) as a function of distance scrolled.
-export const speedAt = (D) => Math.min(1.2, 0.6 + 0.045 * D); // starts at 0.6, tops out at 1.2 (2x) after about 15 s
+export const speedAt = (D) => Math.min(1.2, 0.6 + 0.03 * D); // starts at 0.6, tops out at 1.2 (2x) after about 23 s
 
 // The bars of one board. bar(i) is memoised and depends only on (seed, i).
 // Each bar has 1 to 3 gaps. gaps[0] is a guaranteed route (it never moves further
@@ -130,7 +132,7 @@ export function makeTrack(seed) {
   const between = ([lo, hi]) => lo + Math.floor(trng() * (hi - lo + 1));
   const windows = [];
   for (let start = between(FIRST_VISIT), k = 0; start < MAX_TICKS; k++) {
-    const end = start + between(VISIT_STAY), away = between(VISIT_AWAY);
+    const end = start + between(k < 2 ? VISIT_STAY : VISIT_STAY_BOTH), away = between(VISIT_AWAY);
     windows.push({ start, end, mode: k === 0 ? 'captain' : k === 1 ? 'last' : 'both', after: trng() < 0.5 ? 'snails' : 'tough' });
     start = end + away;
   }
@@ -215,10 +217,12 @@ export function makeTrack(seed) {
   const snails = [];
   let lastSnail = -9;
   const pickWeapon = (r, k) => {
-    const kinds = Object.keys(WEAPONS);
-    let t = r * kinds.reduce((a, w) => a + weaponWeight(w, k), 0);
-    for (const w of kinds) if ((t -= weaponWeight(w, k)) < 0) return w;
-    return 'hammer';
+    const kinds = Object.keys(WEAPONS), tough = bar(k).tough;
+    const total = kinds.reduce((a, w) => a + weaponWeight(w, k, tough), 0);
+    if (total <= 0) return null; // nothing fair to throw from this bar yet
+    let t = r * total;
+    for (const w of kinds) if ((t -= weaponWeight(w, k, tough)) < 0) return w;
+    return 'jacks';
   };
   const snail = (i) => {
     while (snails.length <= i) {
@@ -237,15 +241,15 @@ export function makeTrack(seed) {
         const roomy = segs.filter(([a, z]) => z - a >= 0.1);
         if (roomy.length) {
           const [a, z] = roomy[Math.floor(r2 * roomy.length)];
-          s = { bar: k, x: a + 0.05 + r3 * (z - a - 0.1), kind: pickWeapon(r4, k) };
-          lastSnail = k;
+          const kind = pickWeapon(r4, k);
+          if (kind) { s = { bar: k, x: a + 0.05 + r3 * (z - a - 0.1), kind }; lastSnail = k; }
         }
       }
       snails.push(s);
     }
     return snails[i];
   };
-  return { seed, bar, friend, snail, windows, ghostWindow, phaseAtTick };
+  return { seed, bar, friend, snail, windows, ghostWindow, phaseAtTick, tickAt };
 }
 
 // ---------- ghosts ----------
@@ -285,7 +289,7 @@ export function decodeXs(text) {
 
 export function newRun(track, ghosts = [], startX = 0.5) {
   return {
-    track, ghosts, tick: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
+    track, ghosts, tick: 0, pt: 0, ptPrev: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
     hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0),
     power: null, powerLeft: 0, bubble: 0, invuln: 0, phase: -1, nf: 0, friends: 0,
@@ -313,6 +317,10 @@ export function applyMove(run, x) {
   const pr = pw === 'shrink' ? PR * SHRINK_MULT : PR; // your size right now
   run.D += speedAt(run.D) * TICK * (pw === 'slowmo' ? SLOWMO_MULT : 1);
   run.tick++;
+  // The crew's schedule runs on how far the wreckage has fallen, not on the clock, so Slow-mo cannot pull a
+  // visit or a patch away from the bars it was laid out for. Without Slow-mo it is simply the tick.
+  run.ptPrev = run.pt;
+  run.pt = run.track.tickAt ? run.track.tickAt(run.D) : run.tick;
 
   // A friend ghost drifting through your row.
   const f = run.track.friend(run.nf);
@@ -332,8 +340,8 @@ export function applyMove(run, x) {
 
   // The crew arrive and leave on the board's schedule.
   for (const w of run.track.windows ?? []) {
-    if (w.start === run.tick) events.push('join');
-    else if (w.end === run.tick) events.push('leave');
+    if (run.ptPrev < w.start && run.pt >= w.start) events.push('join');
+    else if (run.ptPrev < w.end && run.pt >= w.end) events.push('leave');
   }
 
   // Past runs. A touch costs a heart (or pops a Shield bubble), then you are safe for a moment.
@@ -341,7 +349,7 @@ export function applyMove(run, x) {
     for (let gi = 0; gi < run.ghosts.length; gi++) {
       const g = run.ghosts[gi];
       const q = g.xs[run.tick - 1];
-      if (q === undefined || run.shatteredUntil[gi] > run.tick || Math.abs(x - q / 65535) >= pr + GR || !ghostPhase(run.track, run.ghosts.length, gi, run.tick).armed) continue;
+      if (q === undefined || run.shatteredUntil[gi] > run.tick || Math.abs(x - q / 65535) >= pr + GR || !ghostPhase(run.track, run.ghosts.length, gi, run.pt).armed) continue;
       run.shatteredUntil[gi] = run.tick + SHATTER_TICKS;
       run.hitGhost = g;
       if (hurt(run, events, 'ghost')) return events;
@@ -402,7 +410,7 @@ function fire(run, sn, y) {
   const spec = WEAPONS[sn.kind];
   const tFall = Math.max(0.25, (PY - y) / spec.vy);
   const aim = Math.max(-2.2, Math.min(2.2, (run.x - sn.x) / tFall)); // straight at where you are right now
-  const add = (kind, vx, extra = {}) => run.shots.push({ id: run.shotId++, kind, x: sn.x, y, vx, vy: spec.vy, r: spec.r, ...extra });
+  const add = (kind, vx, extra = {}) => run.shots.push({ id: run.shotId++, bar: sn.bar, kind, x: sn.x, y, vx, vy: spec.vy, r: spec.r, ...extra });
   if (sn.kind === 'hammer') add('hammer', aim);
   else if (sn.kind === 'jacks') for (const off of [-JACK_SPREAD, 0, JACK_SPREAD]) add('jack', aim + off);
   else add('bomb', aim, { mode: 'fly', fuse: BOMB_FUSE, blast: 0, hit: false });
