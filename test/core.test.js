@@ -297,7 +297,8 @@ test('a snail fires when its bar is 0.8 above you, and a hammer is thrown at whe
   assert.equal(run.shots.length, 1);
   const s = run.shots[0];
   assert.equal(s.kind, 'hammer');
-  assert.ok(Math.abs(s.y - (PY - FIRE_DIST)) < 0.03, `fired from y ${s.y.toFixed(2)}`);
+  const past = s.y - (PY - FIRE_DIST); // how far past the firing line it is: at most one tick of the bar's fall plus one tick of the shot's flight
+  assert.ok(past >= 0 && past < s.vy * TICK + 0.03, `fired ${past.toFixed(3)} past the firing line`);
   const tFall = (PY - s.y) / s.vy;
   assert.ok(Math.abs(s.x + s.vx * tFall - 0.7) < 0.02, 'it is aimed at your position');
 });

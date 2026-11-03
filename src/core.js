@@ -110,7 +110,7 @@ export function mulberry32(seed) {
 }
 
 // Fall speed (world units per second) as a function of distance scrolled.
-export const speedAt = (D) => Math.min(1.4, 0.6 + 0.055 * D);
+export const speedAt = (D) => Math.min(1.2, 0.6 + 0.045 * D); // starts at 0.6, tops out at 1.2 (2x) after about 15 s
 
 // The bars of one board. bar(i) is memoised and depends only on (seed, i).
 // Each bar has 1 to 3 gaps. gaps[0] is a guaranteed route (it never moves further
