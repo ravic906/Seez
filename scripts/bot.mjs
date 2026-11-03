@@ -2,7 +2,7 @@
 // some shake, steers for the middle of the next gap and, when ghosts are about, picks the
 // spot in the gap that is free of ghosts when the bar arrives.
 import {
-  TICK, PY, PR, GR, LAT, GRACE, BLAST_R, speedAt, newRun, step, mulberry32, ghostX,
+  TICK, PY, PR, GR, LAT, GRACE, BLAST_R, GHOST_JOIN, speedAt, newRun, step, mulberry32, ghostX,
 } from '../src/core.js';
 
 // How dangerous standing at x is, given the shots in flight (0 = safe, 1 = about to be hit).
@@ -43,7 +43,8 @@ export function playBot(track, ghosts, { seed = 1, shake = 0.012, reaction = 9, 
           for (let dt = 1; dt <= eta + 40; dt++) {
             px += Math.max(-LAT * TICK, Math.min(LAT * TICK, cand - px));
             if (run.tick + dt <= GRACE) continue;
-            for (const g of ghosts) {
+            for (const [gi, g] of ghosts.entries()) {
+              if (run.passed + 2 < (GHOST_JOIN[gi] ?? 0)) continue; // this one has not joined yet
               const gx = ghostX(g, run.tick + dt);
               if (gx !== null) clear = Math.min(clear, Math.abs(px - gx) - (PR + GR));
             }

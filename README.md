@@ -8,13 +8,13 @@ npm start        # http://localhost:8080 (open it on your phone via your compute
 npm test         # rules, replay checking and leaderboard tests
 npm run tune     # difficulty check with a human-like bot
 ```
-The first launch plays a short animated intro (the ship destroyed, the bot's escape). It can be skipped, and "Watch intro" replays it.
+The first launch plays a short animated intro (the ship destroyed, the bot's escape) with its own score: the engine hum, alien shots and impacts, the explosions, a choir for the lost crew, the launch and a title chime. Browsers need a touch before any sound, so a "Tap for sound" prompt appears; the first tap starts the music in sync with the picture and the next one skips. "Watch intro" replays it.
 
 ## Rules
 - **Steer** with your thumb. You follow it at a capped speed, so you can't teleport. Wreckage ends the run at once. Skim a gap edge for a **graze** bonus.
 - **Sound.** A soft filtered white-noise bed (with a faint low hum) plays from your first touch; the speaker button turns it and all effects off. It brightens during Nitro and muffles during Slow-mo.
 - **Boards.** The wreckage is the same every run of a board. The **Daily board** is the same for everyone each day. **New board** is a private practice board with no ghosts.
-- **Crew ghosts.** You keep two: your best run (the captain, gold) and your last run (blue). They wake 2 seconds after you start. A touch costs one of your **3 suit cells**, shatters that ghost for 2.5 s, and gives you 1.5 s of safety. Lose all three and the run ends.
+- **Crew ghosts.** At the start only **one** comes at you: your best run, the captain (gold), waking 2 seconds in. Your last flight (blue) joins only once you have passed **15 bars**, fading in with 1.5 seconds to wake so it can never appear on top of you. A touch costs one of your **3 suit cells**, shatters that ghost for 2.5 s, and gives you 1.5 s of safety. Lose all three and the run ends. (A ghost whose run was short never arrives.)
 - **Aliens** (snails) sit on the wreckage from bar 10 on. They shake red before they fire, and every shot is slower than you can slide. **Hammer**: fast, straight at where you stood. **Jacks**: a fan of three. **Bomb**: lands, ticks half a second, then a wide blast. A shot costs a suit cell, like a ghost.
 - **Helpers.** Friendly crew spirits drift by carrying a power. Fly into one to take it. Only one timed power works at a time, and a new one replaces the old. The better ones unlock the further you fly:
 
@@ -46,4 +46,4 @@ Limits: the replay check can't tell a flawless bot from a person, and an anonymo
 - `test/`: engine, replay verification, powers, snails and leaderboard tests (a small fake database in `fakedb.js`).
 
 ## Difficulty, measured
-A human-like bot that dodges ghosts and shots (but ignores helpers) survives a median of about 40 s with no ghosts and 15 to 20 s with two, so a strong run makes the next one harder and a weak one easier. Before hearts, a single ghost touch ended a run within seconds.
+A human-like bot that dodges ghosts and shots (but ignores helpers) survives a median of about 40 s with no ghosts, about 32 s with the captain alone, and 20 to 23 s once the second ghost joins, so a strong run makes the next one harder and a weak one easier. Before hearts, a single ghost touch ended a run within seconds.

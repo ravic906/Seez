@@ -4,7 +4,7 @@ import {
   makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
   NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GOLD_MULT,
-  TIER_FROM, powerWeight, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
+  TIER_FROM, powerWeight, GHOST_JOIN, JOIN_GRACE, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
 
@@ -409,10 +409,36 @@ test('a ghost touch costs a heart and starts a safe moment; a ghost that hit you
 
 test('after every ghost hit you get a clear safe window, even with two ghosts on you', () => {
   const run = newRun(wide, [ghostFrom(0.5, 700, 'best'), ghostFrom(0.5, 700, 'recent')], 0.5);
+  run.passed = GHOST_JOIN[1]; // both ghosts are in play
   const hits = [];
   for (let t = 1; t <= 700 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hits.push(t);
   assert.equal(hits.length, HEARTS);
   for (let i = 1; i < hits.length; i++) assert.ok(hits[i] - hits[i - 1] >= SHIELD_TICKS, `hits ${i - 1} and ${i} are ${hits[i] - hits[i - 1]} ticks apart`);
+});
+
+test('only the captain comes at first: the last flight joins after 15 bars, fading in with time to wake', () => {
+  assert.deepEqual(GHOST_JOIN, [0, 15]);
+  const run = newRun(wide, [ghostFrom(0.95, 900, 'best'), ghostFrom(0.5, 900, 'recent')], 0.5);
+  for (let t = 0; t < 400; t++) step(run, 0.5);
+  assert.ok(run.passed < GHOST_JOIN[1]);
+  assert.equal(run.hearts, HEARTS, 'the second ghost sits on you but has not joined yet');
+  assert.equal(run.joinedAt[1], -1);
+  run.passed = GHOST_JOIN[1];
+  const ev = step(run, 0.5);
+  assert.ok(ev.includes('join'), 'the join is announced');
+  assert.equal(run.armAt[1], run.tick + JOIN_GRACE);
+  for (let t = 0; t < JOIN_GRACE; t++) step(run, 0.5);
+  assert.equal(run.hearts, HEARTS, 'overlapping a ghost that is still waking costs nothing');
+  const more = [];
+  for (let t = 0; t < 10; t++) more.push(...step(run, 0.5));
+  assert.ok(more.includes('hurt'), 'once awake it counts');
+});
+
+test('a ghost whose run was short never joins, and a single ghost is simply the captain', () => {
+  const run = newRun(wide, [ghostFrom(0.95, 900, 'best')], 0.5);
+  for (let t = 0; t < 200; t++) step(run, 0.5);
+  assert.equal(run.joinedAt.length, 1);
+  assert.equal(run.armAt[0], GRACE);
 });
 
 test('you can always escape: slide clear in the safe window and you keep your remaining hearts', () => {

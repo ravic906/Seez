@@ -1,6 +1,6 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, PY, PR, BAR_T, GRACE, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, WIDEN_MULT, POWERS, speedAt,
+  TICK, PY, PR, BAR_T, GRACE, GHOST_JOIN, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, WIDEN_MULT, POWERS, speedAt,
   newRun, step, makeTrack, pickGhosts, ghostX, encodeXs, decodeXs,
 } from './core.js';
 import {
@@ -34,7 +34,7 @@ let overAt = 0, shake = 0, bump = 0, flash = { c: '255,77,94', a: 0 };
 const particles = [], floaters = [];
 const stars = makeStars(11, 150);
 const sound = makeSound(() => store.sound !== false);
-let board = null, boardScope = 'today', runToken = 0, lastMood = null;
+let board = null, boardScope = 'today', runToken = 0, lastMood = null, introAudio = false;
 
 // ---------- layout ----------
 
@@ -66,7 +66,7 @@ function showReady() {
   $('start').hidden = false; $('over').hidden = true;
   $('hud').hidden = false; $('legend').hidden = false; $('caption').hidden = true; $('skip').hidden = true;
   const n = ghosts.length;
-  $('start-hint').textContent = n ? `${n} crew ghost${n > 1 ? 's' : ''} waiting. Touch anywhere to start.` : 'Touch anywhere to start.';
+  $('start-hint').textContent = n === 0 ? 'Touch anywhere to start.' : n === 1 ? 'A crew ghost waits. Touch anywhere to start.' : 'A crew ghost waits, and another joins deeper in. Touch anywhere to start.';
   const best = bestScore();
   $('board').textContent = `${boardLabel(seed)}${best ? ` · best ${best}` : ''}`;
   $('score').textContent = '0'; $('status').textContent = '';
@@ -76,7 +76,7 @@ function showReady() {
 }
 
 function renderLegend() {
-  $('legend').innerHTML = ghosts.map((g) => `<span><i style="background:${g.kind === 'best' ? PAL.captain : PAL.crew}"></i>${g.kind === 'best' ? 'Captain' : 'Last flight'} ${g.score}</span>`).join('');
+  $('legend').innerHTML = ghosts.map((g, i) => `<span><i style="background:${g.kind === 'best' ? PAL.captain : PAL.crew}"></i>${g.kind === 'best' ? 'Captain' : 'Last flight'} ${g.score}${GHOST_JOIN[i] ? ` · from bar ${GHOST_JOIN[i]}` : ''}</span>`).join('');
 }
 
 function startRun(startX) {
@@ -131,14 +131,23 @@ function showOver() {
 // ---------- the opening scene ----------
 
 function startIntro() {
-  state = 'intro'; introT = 0; introGuard = clock + 0.4;
+  state = 'intro'; introT = 0; introGuard = clock + 0.4; introAudio = false;
+  $('intro-sound').hidden = true; sound.ambientOff(); // the intro has its own score
+  if (store.sound !== false) { if (sound.state().context === 'running') { sound.introStart(0); introAudio = true; } else $('intro-sound').hidden = false; }
   $('start').hidden = true; $('over').hidden = true; $('hud').hidden = true; $('legend').hidden = true; setChips(null);
   $('caption').hidden = false; $('skip').hidden = false;
   sound.unlock();
 }
 function endIntro() {
+  sound.introStop(); introAudio = false; $('intro-sound').hidden = true;
   store.introSeen = true; saveStore(store);
   showReady();
+  sound.ambientOn();
+}
+// A touch during the opening scene turns the music on first (browsers need a touch before any sound); the next one skips.
+function introPoke() {
+  if (!introAudio && store.sound !== false) { sound.unlock(); sound.introStart(introT); introAudio = true; $('intro-sound').hidden = true; return; }
+  if (clock >= introGuard) endIntro();
 }
 
 // ---------- input ----------
@@ -149,7 +158,7 @@ const sheetOpen = () => !$('sheet-board').hidden || !$('sheet-guide').hidden;
 stage.addEventListener('pointerdown', (e) => {
   if (e.target.closest('button') || sheetOpen()) return;
   const x = pointerX(e);
-  if (state === 'intro') { if (clock >= introGuard) endIntro(); return; }
+  if (state === 'intro') { introPoke(); return; }
   if (state === 'ready') startRun(x);
   else if (state === 'over' && clock >= overAt) startRun(x);
   else if (state === 'playing') target = x;
@@ -158,7 +167,7 @@ stage.addEventListener('pointerdown', (e) => {
 stage.addEventListener('pointermove', (e) => { if (state === 'playing' && e.buttons !== 0) target = pointerX(e); });
 
 const keys = new Set();
-const begin = () => { if (sheetOpen()) return; if (state === 'ready') startRun(0.5); else if (state === 'over' && clock >= overAt) startRun(0.5); else if (state === 'intro' && clock >= introGuard) endIntro(); };
+const begin = () => { if (sheetOpen()) return; if (state === 'ready') startRun(0.5); else if (state === 'over' && clock >= overAt) startRun(0.5); else if (state === 'intro') introPoke(); };
 addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft' || e.key === 'a') keys.add('l');
   else if (e.key === 'ArrowRight' || e.key === 'd') keys.add('r');
@@ -187,7 +196,7 @@ $('sound').addEventListener('click', () => {
   if (store.sound !== false) { sound.ambientOn(); sound.pass(); } else sound.ambientOff();
 });
 // Browsers only allow sound after a touch, so the ambient bed starts on the first one.
-for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { sound.unlock(); sound.ambientOn(); }, { capture: true, passive: true });
+for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { sound.unlock(); if (state !== 'intro') sound.ambientOn(); }, { capture: true, passive: true });
 
 // ---------- sheets: leaderboard and field guide ----------
 
@@ -247,7 +256,7 @@ function guideRow(list, icon, title, text) {
 function buildGuide() {
   const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
-  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. The captain (gold) is your best run, the blue one your last. A touch costs a suit cell, then you get a safe moment.');
+  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. Your best run, the captain (gold), is waiting from the start. Your last flight (blue) joins after you pass 15 bars, fading in with time to wake. A touch costs a suit cell, then you get a safe moment.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Aliens', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
@@ -308,6 +317,7 @@ function handleEvents(events) {
     else if (e === 'bubble') { sound.power(); say('SHIELD', '#9fe6ff'); }
     else if (e === 'heal') { sound.heal(); say('REPAIR', PAL.warn); burst(sx(run.x), sy(PY), '#ff8a96', 10); }
     else if (e.startsWith('power:')) { const k = e.slice(6); sound.power(); say(POWER_NAME[k].toUpperCase(), tierColor(k)); burst(sx(run.x), sy(PY), tierColor(k), 14); }
+    else if (e === 'join') { sound.join(); say('A CREW MEMBER JOINS', PAL.crew, -52); }
     else if (e === 'fire') sound.fire();
     else if (e === 'boom') { sound.boom(); shake = Math.max(shake, 0.35); }
   }
@@ -370,10 +380,13 @@ function drawGame(dt) {
   list.forEach((g, gi) => {
     const gx = ghostX(g, tick);
     if (gx === null) return;
+    if (!run && gi > 0) return;                        // on the start screen only the captain waits
+    if (run && run.joinedAt[gi] < 0) return;           // later ghosts have not joined yet
+    const fadeIn = run && run.joinedAt[gi] > 0 ? Math.min(1, (tick - run.joinedAt[gi]) / 40) : 1;
     const shat = run && run.shatteredUntil[gi] > tick ? (run.shatteredUntil[gi] - tick) / SHATTER_TICKS : 0;
     drawCrew(ctx, sx(gx), sy(PY), PR * scale, {
-      t, kind: g.kind, armed: run ? tick > GRACE : false, shattered: shat, vx: px(g, tick),
-      near: run ? Math.abs(gx - run.x) < 0.14 : false, fade: pw === 'exorcise' ? 0.22 : 1,
+      t, kind: g.kind, armed: run ? tick > run.armAt[gi] : false, shattered: shat, vx: px(g, tick),
+      near: run ? Math.abs(gx - run.x) < 0.14 : false, fade: (pw === 'exorcise' ? 0.22 : 1) * fadeIn,
     });
     if (pw === 'foresight') { // where this crew member will be as the wreckage arrives
       ctx.save();
@@ -455,7 +468,8 @@ function frame(ts) {
       setHearts(run.hearts); setChips(run);
       if (run.power !== lastMood) { lastMood = run.power; sound.mood(run.power); }
       const wake = run.ghosts.length && run.tick < GRACE ? ((GRACE - run.tick) / 60).toFixed(1) : null;
-      $('status').textContent = wake ? `crew wakes in ${wake}s` : run.ghosts.length ? 'crew awake' : '';
+      const waking = run.armAt.some((a, i) => run.joinedAt[i] > 0 && run.tick <= a);
+      $('status').textContent = wake ? `crew wakes in ${wake}s` : waking ? 'a crew member is waking' : run.ghosts.length ? 'crew awake' : '';
       if (!run.alive) endRun();
     } else if (state === 'dying' && clock >= overAt) { setChips(null); showOver(); }
     shake = Math.max(0, shake - dt * 2.2);

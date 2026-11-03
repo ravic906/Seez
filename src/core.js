@@ -19,6 +19,8 @@ export const GRACE = 120;      // ticks at the start when ghosts cannot hurt you
 export const GRAZE = 0.012;    // passing a bar edge closer than this is a graze
 export const MAX_TICKS = 60 * 240;
 export const MAX_GHOSTS = 2;  // your best run and your last run
+export const GHOST_JOIN = [0, 15]; // bars you must pass before each ghost joins: the captain at once, the last flight deeper in
+export const JOIN_GRACE = 90;      // a ghost that joins mid-run needs 1.5 s to wake before it can touch you
 
 export const PTS_BAR = 10;
 export const PTS_GRAZE = 5;
@@ -246,6 +248,8 @@ export function newRun(track, ghosts = [], startX = 0.5) {
     track, ghosts, tick: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
     hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0),
+    // ghost gi joins once you have passed GHOST_JOIN[gi] bars, and can touch you from armAt[gi] on
+    joinedAt: ghosts.map((_, i) => (GHOST_JOIN[i] === 0 ? 0 : -1)), armAt: ghosts.map((_, i) => (GHOST_JOIN[i] === 0 ? GRACE : Infinity)),
     power: null, powerLeft: 0, bubble: 0, invuln: 0, phase: -1, nf: 0, friends: 0,
     ns: 0, shots: [], shotId: 0, lenient: false,
   };
@@ -286,12 +290,17 @@ export function applyMove(run, x) {
     } else { run.power = f.kind; run.powerLeft = POWERS[f.kind].ticks + 1; events.push(`power:${f.kind}`); }
   }
 
+  // Later ghosts join as you go deeper, waking for JOIN_GRACE before they can touch you.
+  for (let gi = 0; gi < run.ghosts.length; gi++) {
+    if (run.joinedAt[gi] < 0 && run.passed >= (GHOST_JOIN[gi] ?? 0)) { run.joinedAt[gi] = run.tick; run.armAt[gi] = run.tick + JOIN_GRACE; events.push('join'); }
+  }
+
   // Past runs. A touch costs a heart (or pops a Shield bubble), then you are safe for a moment.
-  if (run.tick > GRACE && run.shield === 0 && run.invuln === 0 && pw !== 'exorcise') {
+  if (run.shield === 0 && run.invuln === 0 && pw !== 'exorcise') {
     for (let gi = 0; gi < run.ghosts.length; gi++) {
       const g = run.ghosts[gi];
       const q = g.xs[run.tick - 1];
-      if (q === undefined || run.shatteredUntil[gi] > run.tick || Math.abs(x - q / 65535) >= pr + GR) continue;
+      if (run.tick <= run.armAt[gi] || q === undefined || run.shatteredUntil[gi] > run.tick || Math.abs(x - q / 65535) >= pr + GR) continue;
       run.shatteredUntil[gi] = run.tick + SHATTER_TICKS;
       run.hitGhost = g;
       if (hurt(run, events, 'ghost')) return events;
