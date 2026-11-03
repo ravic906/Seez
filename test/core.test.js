@@ -195,7 +195,7 @@ test('Exorcise: your past ghosts cannot touch you for its whole duration, then t
   assert.ok(ev.includes('hurt'), 'the ghost is back afterwards');
 });
 
-test('Heal restores a heart, and gives a Shield instead when you are already full', () => {
+test('Heal restores a heart, and gives a safe window instead when you are already full', () => {
   const run = newRun(fixedTrack([{ c: 0.5, w: 1 }], [friendAt(20, 0.5, 'heal'), friendAt(60, 0.5, 'heal')]), [], 0.5);
   run.hearts = 1;
   for (let t = 0; t < 30; t++) step(run, 0.5);
@@ -204,7 +204,8 @@ test('Heal restores a heart, and gives a Shield instead when you are already ful
   run.hearts = HEARTS;
   while (run.nf < 2 && run.tick < 120) step(run, 0.5);
   assert.equal(run.hearts, HEARTS);
-  assert.ok(run.bubble > 0, 'a full-hearts Heal becomes a Shield');
+  assert.equal(run.bubble, 0, 'no bubble, which would also save you from a bar');
+  assert.ok(run.invuln > 0, 'a full-hearts Heal becomes a short safe window');
 });
 
 test('Phase lets you pass straight through bars for its duration', () => {
@@ -402,9 +403,10 @@ test('a ghost touch costs a heart and starts a safe moment; a ghost that hit you
   const hits = [];
   for (let t = 1; t <= 600 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hits.push(t);
   assert.equal(hits[0], GRACE + 1, 'first touch the moment the grace period ends');
-  assert.equal(hits[1], GRACE + 1 + SHATTER_TICKS, 'the same ghost can hit again only after it re-forms');
+  assert.equal(hits[1], GRACE + 1 + SHIELD_TICKS + 1, 'the same ghost can hit again only once the safe window is over');
+  assert.ok(hits[1] - hits[0] >= SHATTER_TICKS, 'and not before it has re-formed');
   assert.equal(run.cause, 'ghost');
-  assert.equal(run.tick, GRACE + 1 + 2 * SHATTER_TICKS, 'the third touch ends the run');
+  assert.equal(run.tick, GRACE + 1 + 2 * (SHIELD_TICKS + 1), 'the third touch ends the run');
   assert.equal(run.hearts, 0);
   assert.equal(run.hitGhost, g);
 });
@@ -633,4 +635,24 @@ test('faked runs are rejected: inflated score, teleporting, wrong board, and une
   assert.equal(verifyRun(3, []).reason, 'length');
   assert.equal(verifyRun(3, [1.5, 2]).reason, 'values');
   assert.equal(verifyRun(3, Array(60 * 241).fill(30000)).reason, 'length');
+});
+
+test('two ghosts on a stationary player cannot chain hits faster than a ghost re-forms', () => {
+  const run = newRun(wide, [ghostFrom(0.5, 900, 'best'), ghostFrom(0.5, 900, 'recent')], 0.5);
+  const hits = [];
+  for (let t = 1; t <= 900 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hits.push(t);
+  assert.ok(hits.length >= 2);
+  for (let i = 1; i < hits.length; i++) assert.ok(hits[i] - hits[i - 1] >= SHATTER_TICKS, 'every hit is followed by a full safe window');
+});
+
+test('a replay judges the aliens: a run that ignores every shot does not verify, and neither does a sparse list', () => {
+  for (const seed of [500005, 20261103]) {
+    const run = newRun(makeTrack(seed), [], 0.5);
+    run.lenient = true; // the forger's own copy never dies to a shot...
+    while (run.alive && run.tick < 14400) step(run, run.track.bar(run.next).c);
+    assert.ok(run.score > 1000, 'the forged run really did score a lot');
+    assert.equal(verifyRun(seed, run.xs, run.score).ok, false, `seed ${seed}: a route that ignores the aliens is rejected`);
+  }
+  const sparse = new Array(50); sparse[0] = 32768; sparse[49] = 32768;
+  assert.equal(verifyRun(500005, sparse).ok, false, 'holes in the list are not accepted');
 });

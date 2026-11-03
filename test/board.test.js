@@ -10,7 +10,9 @@ import { randomHandle } from '../src/names.js';
 const TODAY = 20261103;
 const honest = (seed, ticks = 60 * 25, botSeed = 5) => {
   const r = playBot(makeTrack(seed), [], { seed: botSeed, shake: 0.01, reaction: 6, maxTicks: ticks });
-  return { s: r.score, bars: r.passed, grazes: r.grazes, ticks: r.xs.length, x: encodeXs(r.xs), xs: r.xs };
+  // A bot cut off by the tick limit is still alive, which a real run never is: score it as the board will.
+  const v = verifyRun(seed, r.xs);
+  return { s: v.score, bars: v.bars, grazes: v.grazes, ticks: r.xs.length, x: encodeXs(r.xs), xs: r.xs };
 };
 
 test('daily boards: valid dates only, and the last week counts back across months', () => {

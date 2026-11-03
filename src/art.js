@@ -257,7 +257,7 @@ export const POWER_HELP = {
   shrink: 'You get smaller for 6 s, so tight gaps fit.',
   gold: 'Triple points for 5 s.',
   foresight: 'Shows where the crew ghosts will be for 6 s.',
-  heal: 'Restores a suit cell. At full, gives a shield.',
+  heal: 'Restores a suit cell. At full, 5 s of safety.',
   phase: 'Fly straight through wreckage and shots for 2 s.',
 };
 export const tierColor = (kind) => ({ 1: PAL.friend, 2: PAL.violet, 3: PAL.captain }[POWERS[kind].tier]);

@@ -14,7 +14,7 @@ The first launch plays a short animated intro (the ship destroyed, the bot's esc
 - **Steer** with your thumb. You follow it at a capped speed, so you can't teleport. Wreckage ends the run at once. Skim a gap edge for a **graze** bonus.
 - **Sound.** A soft filtered white-noise bed (with a faint low hum) plays from your first touch; the speaker button turns it and all effects off. It brightens during Nitro and muffles during Slow-mo.
 - **Boards.** The wreckage is the same every run of a board. The **Daily board** is the same for everyone each day. **New board** is a private practice board with no leaderboard (your own runs on it still come back as ghosts).
-- **Crew ghosts come and go.** The crew first find you 10 to 15 seconds in, stay for 12 to 18 seconds, then drift away for 12 to 18 seconds, and repeat, at times fixed by the board. The first visit is your best run (the captain, gold), the second your last flight (blue), and later visits can bring both. A visiting ghost fades in and has 1.5 s to wake, and can't touch you for its last 0.75 s as it leaves. A touch costs one of your **3 suit cells**, shatters that ghost for 2.5 s, and gives you 1.5 s of safety. Lose all three and the run ends. A ghost whose run was short never arrives.
+- **Crew ghosts come and go.** The crew first find you 10 to 15 seconds in, stay for 12 to 18 seconds, then drift away for 12 to 18 seconds, and repeat, at times fixed by the board. The first visit is your best run (the captain, gold), the second your last flight (blue), and later visits can bring both. A visiting ghost fades in and has 1.5 s to wake, and can't touch you for its last 0.75 s as it leaves. A touch costs one of your **3 suit cells**, shatters that ghost for 2.5 s, and gives you 2.5 s of safety (the same time the ghost takes to re-form). Lose all three and the run ends. A ghost whose run was short never arrives.
 - **Something is always after you.** While the crew are away, the board gives you either an **alien nest** (aliens on most bars) or a **tight patch** (narrower gaps, fewer of them, lit red). Before the first visit a few aliens keep you busy. The line under the score tells you what it is: *aliens in the wreckage*, *the crew is after you*, *alien nest*, *tight wreckage*.
 - **Aliens** (snails) sit on the wreckage from bar 4 on. They shake red before they fire, and every shot is slower than you can slide. **Hammer**: thrown straight at where you stood. **Jacks**: a fan of three. **Bomb**: lands, ticks half a second, then a wide blast. A shot costs a suit cell, like a ghost.
 - **Helpers.** Friendly crew spirits drift by carrying a power. Fly into one to take it. Only one timed power works at a time, and a new one replaces the old. The better ones unlock the further you fly:
@@ -29,13 +29,13 @@ The first launch plays a short animated intro (the ship destroyed, the bot's esc
 | 2 | Exorcise | crew ghosts can't touch you for 5 s |
 | 2 | Shrink | you get smaller for 6 s |
 | 2 | Gold rush | triple points for 5 s |
-| 3 | Repair | +1 suit cell (a Shield if you are full) |
+| 3 | Repair | +1 suit cell (5 s of safety if you are full) |
 | 3 | Phase | fly through wreckage and shots for 2 s |
 
 ## Leaderboard
 Where the page has a shared database (the hosted Claude page), a **Survivors** board appears: Today and This week. Players are random callsigns (rerollable), with no names or profiles. **Every score is checked by replaying the saved run**, so a faked score or an impossible move simply isn't listed. To let friends post scores, give them **Contributor** access to the page; viewers can read but not post. It is not available in the standalone build.
 
-Limits: the replay check can't tell a flawless bot from a person, and it can't stop someone posting a verbatim copy of another player's run (there is no server clock to say who posted first), and an anonymous friends' board isn't a hardened competition.
+Limits: the replay also plays the aliens' shots (with a few spare cells, since it can't see your ghosts), so a route that ignores them is cut off early, but it can't tell a flawless bot from a person, and it can't stop someone posting a verbatim copy of another player's run (there is no server clock to say who posted first), and an anonymous friends' board isn't a hardened competition.
 
 ## Code
 - `src/core.js`: the rules at a fixed 60 Hz. Every position is snapped to a 16-bit grid so a saved run replays exactly (`verifyRun`).

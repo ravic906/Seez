@@ -32,7 +32,8 @@ export const PTS_BAR = 10;
 export const PTS_GRAZE = 5;
 
 export const HEARTS = 3;
-export const SHIELD_TICKS = 90;     // safe from ghosts for 1.5 s after a ghost hit
+export const REPLAY_SPARE_HEARTS = 3; // extra hearts a replay gets for ghost hits it cannot see
+export const SHIELD_TICKS = 150;    // safe for 2.5 s after any hit (as long as the ghost that hit you stays shattered)
 export const SHATTER_TICKS = 150;   // a ghost that hit you cannot hit again for 2.5 s
 
 export const FR = 0.04;             // a friend ghost's pickup radius (generous)
@@ -93,6 +94,7 @@ export function weaponWeight(kind, bar) {
   return w.weight * (kind === 'hammer' ? 1 - 0.5 * p : kind === 'jacks' ? 0.7 + 0.6 * p : 0.5 + p);
 }
 export const BUBBLE_TICKS = 480;    // a Shield bubble waits up to 8 s for a hit to absorb
+export const HEAL_SAFE_TICKS = 300; // a Repair at full cells: 5 s in which nothing can hurt you (never touches the bars)
 export const INVULN_TICKS = 60;     // 1 s of full invulnerability after a bubble absorbs a hit
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -321,7 +323,9 @@ export function applyMove(run, x) {
     // Timers start one tick high because they count down at the end of this same tick.
     if (f.kind === 'shield') { run.bubble = BUBBLE_TICKS + 1; events.push('bubble'); }
     else if (f.kind === 'heal') {
-      if (run.hearts < HEARTS) run.hearts++; else run.bubble = BUBBLE_TICKS + 1; // full hearts: a Shield instead
+      // At full cells it gives a safe window against hits instead of a bubble: a bubble also saves you from
+      // a bar, and a replay (which cannot see your ghost hits) could not tell whether you were full.
+      if (run.hearts < HEARTS) run.hearts++; else run.invuln = HEAL_SAFE_TICKS + 1;
       events.push('heal');
     } else { run.power = f.kind; run.powerLeft = POWERS[f.kind].ticks + 1; events.push(`power:${f.kind}`); }
   }
@@ -383,7 +387,7 @@ export function applyMove(run, x) {
 }
 
 // A hit from a ghost or a snail's shot: a Shield bubble absorbs it, otherwise it costs a heart and
-// starts a safe moment. Returns true if it ended the run. (Replays are lenient: they never end here.)
+// starts a safe moment. Returns true if it ended the run. (A lenient run never ends here: tests and bots use it.)
 function hurt(run, events, cause) {
   if (run.shield > 0 || run.invuln > 0) return false;
   if (run.bubble > 0) { run.bubble = 0; run.invuln = INVULN_TICKS + 1; events.push('absorb'); return false; }
@@ -434,18 +438,28 @@ function updateShots(run, events, pr, pw) {
 // Ghosts are left out, so a run that survived with ghosts is judged on the bars alone.
 export function verifyRun(seed, xs, claimedScore) {
   if (!Array.isArray(xs) || !xs.length || xs.length > MAX_TICKS) return { ok: false, reason: 'length' };
-  if (xs.some((v) => !Number.isInteger(v) || v < 0 || v > 65535)) return { ok: false, reason: 'values' };
+  for (let i = 0; i < xs.length; i++) { // a plain loop: .some() skips the holes of a sparse array
+    const v = xs[i];
+    if (!Number.isInteger(v) || v < 0 || v > 65535) return { ok: false, reason: 'values' };
+  }
   const run = newRun(makeTrack(seed), [], xs[0] / 65535);
-  run.lenient = true; // only the bars can end a replay; ghosts and snails are judged by the player's own hearts
-  let prev = null;
+  // A replay has no ghosts, so it cannot tell what they cost the player or which shots their safe moments
+  // absorbed. It does judge the aliens' shots, which depend only on where the player stood, with a few
+  // spare hearts for that difference. Ignoring the aliens would end a replay long before a high score.
+  run.hearts = HEARTS + REPLAY_SPARE_HEARTS;
+  let prev = null, before = null;
   for (let t = 0; t < xs.length; t++) {
     const x = xs[t] / 65535;
+    if (t === xs.length - 1) before = { score: run.score, passed: run.passed, grazes: run.grazes };
     if (x < PR - 1e-4 || x > W - PR + 1e-4) return { ok: false, reason: 'bounds', tick: t + 1 };
     if (prev !== null && Math.abs(x - prev) > maxMove(run) + 2e-5) return { ok: false, reason: 'speed', tick: t + 1 };
     applyMove(run, x);
     if (!run.alive && t < xs.length - 1) return { ok: false, reason: 'dead-early', tick: t + 1 };
     prev = x;
   }
+  // A hit that kills you skips that tick's bar pass. The replay has spare hearts, so if it is still alive
+  // after the last tick, the real run was killed by a hit on it: take that tick's pass back out.
+  if (run.alive) { run.score = before.score; run.passed = before.passed; run.grazes = before.grazes; }
   const out = { ok: true, score: run.score, bars: run.passed, grazes: run.grazes, ticks: xs.length, friends: run.friends };
   if (claimedScore !== undefined && claimedScore !== run.score) return { ...out, ok: false, reason: 'score' };
   return out;
