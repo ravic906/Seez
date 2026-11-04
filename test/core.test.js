@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, barClearance, openings, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
-  GHOST_ARM_SCORE, NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
+  GHOST_ARM_SCORE, CREW_FULL_SCORE, EASE_ARMED_TICKS, NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
   TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_STAY_BOTH, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
@@ -843,4 +843,25 @@ test('a bomb never blasts while wreckage is crossing your row', () => {
       }
     }
   }
+});
+
+test('eased in: from 700 only the captain can hurt you, and only early in a visit; the whole crew from CREW_FULL_SCORE', () => {
+  const visit = { start: 200, end: 200 + 1500, mode: 'both', after: 'snails' };
+  const track = fixedTrack([{ c: 0.5, w: 1 }], null, () => null, visit);
+  const hitsAt = (bestScore, standOn) => {
+    const ghosts = [ghostFrom(0.3, 2000, 'best', bestScore), ghostFrom(0.7, 2000, 'recent', bestScore)];
+    const run = newRun(track, ghosts, standOn);
+    const hits = [];
+    for (let t = 1; t <= 1800 && run.alive; t++) if (step(run, standOn).includes('hurt')) hits.push({ t, ghost: run.hitGhost.kind, into: t - visit.start });
+    return { level: run.crewLevel, hits };
+  };
+  const capt = hitsAt(GHOST_ARM_SCORE, 0.3);
+  assert.equal(capt.level, 1);
+  assert.ok(capt.hits.length >= 1, 'the captain does hurt you early in the visit');
+  assert.ok(capt.hits.every((h) => h.ghost === 'best' && h.into < EASE_ARMED_TICKS), JSON.stringify(capt.hits));
+  assert.deepEqual(hitsAt(GHOST_ARM_SCORE, 0.7).hits, [], 'the last flight only watches while the crew are eased in');
+  const full = hitsAt(CREW_FULL_SCORE, 0.7);
+  assert.equal(full.level, 2);
+  assert.ok(full.hits.length >= 2 && full.hits.some((h) => h.into >= EASE_ARMED_TICKS), 'the whole crew, all visit long');
+  assert.equal(hitsAt(GHOST_ARM_SCORE - 1, 0.3).hits.length, 0, 'below 700 they only watch');
 });

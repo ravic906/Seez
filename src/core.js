@@ -41,6 +41,12 @@ export const GHOST_REARM_MAX = 360;  // or 6 s have passed (so hugging your own 
 // Until your best run on a board scores this much (about 45 s for a casual player), the crew only watch:
 // they visit and fly your old route, but cannot hurt you. Beginners get to learn the wreckage first.
 export const GHOST_ARM_SCORE = 700;
+// Then the crew are eased in: from GHOST_ARM_SCORE only the captain (your best run) can hurt you, and
+// only for the first EASE_ARMED_TICKS of each visit (4 s, so about 2.5 s once it has woken); the whole
+// crew from CREW_FULL_SCORE. Calibrated with the beginner model: casual players keep ~85% of their
+// first-attempt time while eased (8 s kept only ~50%: they crashed into wreckage dodging the captain).
+export const CREW_FULL_SCORE = 1500;
+export const EASE_ARMED_TICKS = 240;
 
 export const FR = 0.04;             // a friend ghost's pickup radius (generous)
 export const NITRO_MULT = 1.7;      // sideways speed while Nitro lasts; points double too
@@ -297,11 +303,18 @@ export function decodeXs(text) {
 
 // ---------- a run ----------
 
+// How dangerous the crew are on this board, from the score of your best run there (the captain).
+export function crewLevelFor(best) {
+  const s = best?.score ?? 0;
+  return s >= CREW_FULL_SCORE ? 2 : s >= GHOST_ARM_SCORE ? 1 : 0;
+}
+
 export function newRun(track, ghosts = [], startX = 0.5) {
   for (const g of ghosts) alignGhost(track, g);
   const best = ghosts.find((g) => g.kind === 'best') ?? ghosts[0];
   return {
-    crewArmed: !!best && (best.score ?? 0) >= GHOST_ARM_SCORE,
+    crewLevel: crewLevelFor(best), // 0 watching, 1 captain only (eased), 2 the whole crew
+    get crewArmed() { return this.crewLevel > 0; },
     track, ghosts, tick: 0, pt: 0, ptPrev: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
     hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0), mustLeave: ghosts.map(() => false), hitAt: ghosts.map(() => -1e9),
@@ -559,18 +572,24 @@ export function gapMargin(bar, x, pr = PR, widen = 1) {
 }
 
 // Is ghost gi visiting right now? Visits start with the captain, then the last flight, then both.
-const NO_GHOST = { visible: false, armed: false, fade: 0 };
+const NO_GHOST = { visible: false, armed: false, fade: 0, into: 0 };
 export function ghostPhase(track, nGhosts, gi, tick) {
   const w = track.ghostWindow(tick);
   if (!w) return NO_GHOST;
   const ok = w.mode === 'both' || (w.mode === 'captain' && gi === 0) || (w.mode === 'last' && gi === (nGhosts > 1 ? 1 : 0));
   if (!ok) return NO_GHOST;
   const into = tick - w.start, left = w.end - tick;
-  return { visible: true, armed: into > JOIN_GRACE && left > LEAVE_GRACE, fade: clamp(Math.min(into / 40, left / 40), 0, 1) };
+  return { visible: true, armed: into > JOIN_GRACE && left > LEAVE_GRACE, fade: clamp(Math.min(into / 40, left / 40), 0, 1), into };
 }
 
 // Can ghost gi hurt you right now? Not while shattered, and not again until you have moved clear of it.
-export const ghostCanHit = (run, gi) => run.crewArmed && run.shatteredUntil[gi] <= run.tick && (!run.mustLeave[gi] || run.tick >= run.hitAt[gi] + GHOST_REARM_MAX);
+export const ghostCanHit = (run, gi) => crewMayHurt(run, gi) && run.shatteredUntil[gi] <= run.tick && (!run.mustLeave[gi] || run.tick >= run.hitAt[gi] + GHOST_REARM_MAX);
+// The crew level's part: nobody while they watch; while eased in, only the captain and only early in a visit.
+function crewMayHurt(run, gi) {
+  if (run.crewLevel >= 2) return true;
+  if (run.crewLevel < 1 || gi !== 0) return false;
+  return ghostPhase(run.track, run.ghosts.length, gi, run.pt).into < EASE_ARMED_TICKS;
+}
 
 // Is wreckage crossing your row or about to (used to hold Wide gaps and Shrink until it has passed)?
 function barNear(run) {

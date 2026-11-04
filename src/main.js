@@ -1,6 +1,6 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, POWERS, speedAt,
+  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, CREW_FULL_SCORE, EASE_ARMED_TICKS, JOIN_GRACE, POWERS, speedAt,
   newRun, step, makeTrack, pickGhosts, ghostX, ghostCanHit, openings, encodeXs, decodeXs,
 } from './core.js';
 import {
@@ -108,7 +108,8 @@ function endRun() {
   $('over-flag').textContent = isBest && score > 0 ? 'New best' : '';
   $('over-why').textContent = WHY[cause] ?? '';
   // the first time a run on this board reaches GHOST_ARM_SCORE, say that the crew will fight back
-  if (prevBest < GHOST_ARM_SCORE && score >= GHOST_ARM_SCORE) $('over-why').textContent += ' From now on your crew can hurt you on this board.';
+  if (prevBest < CREW_FULL_SCORE && score >= CREW_FULL_SCORE) $('over-why').textContent += ' From now on the whole crew can hurt you on this board.';
+  else if (prevBest < GHOST_ARM_SCORE && score >= GHOST_ARM_SCORE) $('over-why').textContent += ' From now on the captain can hurt you on this board, early in each visit.';
   $('over-rank').hidden = true;
   $('board').textContent = `${boardLabel(seed)} · best ${Math.max(prevBest, score)}`;
   if (board && score > 0) postAndRank({ s: score, bars, grazes, ticks: xs.length, x: encodeXs(xs) }, runToken);
@@ -266,7 +267,7 @@ function guideRow(list, icon, title, text) {
 function buildGuide() {
   const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
-  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. While you are new to a board they only watch; once one of your runs there scores 700, a touch costs a suit cell, then you get a safe moment. Move off that ghost: it cannot touch you again until you have. Only the crew (gold and blue) can hurt you.');
+  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. While you are new to a board they only watch. Once one of your runs there scores 700, the captain can hurt you early in each visit; from 1,500, the whole crew can. A touch costs a suit cell, then you get a safe moment. Move off that ghost: it cannot touch you again until you have. Only the crew (gold and blue) can hurt you.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Alien snails', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
@@ -327,7 +328,7 @@ function handleEvents(events) {
     else if (e === 'bubble') { sound.power(); say('SHIELD', '#9fe6ff'); }
     else if (e === 'heal') { sound.heal(); say('REPAIR', PAL.warn); burst(sx(run.x), sy(PY), '#ff8a96', 10); }
     else if (e.startsWith('power:')) { const k = e.slice(6); sound.power(); say(POWER_NAME[k].toUpperCase(), tierColor(k)); burst(sx(run.x), sy(PY), tierColor(k), 14); }
-    else if (e === 'join') { if (crewHere(run, run.pt).length) { sound.join(); say(run.crewArmed ? 'THE CREW FINDS YOU' : 'THE CREW IS WATCHING', PAL.crew, -52); } }
+    else if (e === 'join') { if (crewHere(run, run.pt).length) { sound.join(); say(run.crewLevel === 2 ? 'THE CREW FINDS YOU' : run.crewLevel === 1 && crewHere(run, run.pt).some((x) => x.i === 0) ? 'THE CAPTAIN FINDS YOU' : 'THE CREW IS WATCHING', PAL.crew, -52); } }
     else if (e === 'leave') {
       if (crewHere(run, run.pt - 1).length) say('the crew drifts away', PAL.muted, -52);
       // announce what comes next, so a nest or a tight patch never arrives unannounced
@@ -492,13 +493,15 @@ function threatLabel(r) {
   if (ph.kind === 'patch') return ph.patch === 'tough' ? 'tight wreckage' : 'alien nest';
   const g = crewHere(r, r.pt);
   if (!g.length) return 'the crew is quiet';
-  if (!r.crewArmed) return 'the crew is watching';
-  return g.some((x) => !x.armed) ? 'the crew is waking' : 'the crew is after you';
+  const hunting = g.filter((x) => r.crewLevel === 2 || (r.crewLevel === 1 && x.i === 0 && x.into < EASE_ARMED_TICKS)); // by level, not by a passing shatter
+  // still waking (first 1.5 s of a visit) and about to be able to hurt you
+  if (!hunting.length) return r.crewLevel > 0 && g.some((x) => !x.armed && x.into <= JOIN_GRACE && (r.crewLevel === 2 || x.i === 0)) ? 'the crew is waking' : 'the crew is watching';
+  return r.crewLevel === 1 ? 'the captain is after you' : 'the crew is after you';
 }
 
 // The crew members actually out here at schedule time pt (visiting, and their run reached this far).
 function crewHere(r, pt) {
-  return r.ghosts.map((g, i) => ({ g, ...ghostPhase(r.track, r.ghosts.length, i, pt) })).filter((x) => x.visible && ghostX(x.g, pt) !== null);
+  return r.ghosts.map((g, i) => ({ g, i, ...ghostPhase(r.track, r.ghosts.length, i, pt) })).filter((x) => x.visible && ghostX(x.g, pt) !== null);
 }
 
 // ---------- main loop ----------
