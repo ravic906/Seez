@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, verifyRun, speedAt,
+  makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, barClearance, openings, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
   NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
   TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_STAY_BOTH, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
@@ -772,4 +772,28 @@ test('Wide gaps and Shrink wait for the wreckage at your row to pass before they
     for (let i = 0; i < 3; i++) step(run, 0.5);
     assert.equal(run.power, null, `${kind}: and it ends once the bar has passed`);
   }
+});
+
+test('the hitbox is round like the bot: clipping a plate corner you visibly miss is not a hit', () => {
+  const bar = { gaps: [{ c: 0.5, w: 0.2 }] }; // plates end at 0.4 and 0.6
+  // centre just right of where a square hitbox would touch the plate at 0.6, plate edge a little above/below
+  const x = 0.6 - PR + 0.004, dy = PR * 0.8;
+  assert.ok(gapMargin(bar, x, PR) < 0, 'a square hitbox would overlap the plate sideways');
+  assert.ok(barClearance(bar, x, PR, 1, dy) >= 0, 'but the round bot clears the corner');
+  assert.ok(barClearance(bar, x, PR, 1, 0) < 0, 'level with the plate it is a hit');
+  assert.ok(barClearance(bar, 0.6 + 0.01, PR, 1, PR * 0.5) < 0, 'centre over the plate and close: a hit');
+  // level with you, clearance is exactly the old sideways margin, so grazes did not change
+  for (const xx of [0.45, 0.5, 0.55, 0.43]) assert.ok(Math.abs(barClearance(bar, xx, PR, 1, 0) - gapMargin(bar, xx, PR)) < 1e-12);
+});
+
+test('a sliver of plate too thin to see is never solid: with Wide gaps, gaps that nearly meet are one opening', () => {
+  const bar = { gaps: [{ c: 0.3, w: 0.2 }, { c: 0.6, w: 0.2 }] }; // 0.1 apart, so x1.5 leaves a 0.0 to 0.01 sliver
+  assert.deepEqual(openings(bar, 1).length, 2, 'normal gaps stay apart');
+  const wide = openings(bar, 1.5);
+  assert.equal(wide.length, 1, 'widened, they merge');
+  assert.ok(barClearance(bar, 0.45, PR, 1.5, 0) >= 0, 'flying through the join is safe');
+  const wall = openings({ gaps: [{ c: 0.1, w: 0.2 }] }, 1); // gap starts at 0.0: no 0-width plate at the wall
+  assert.equal(wall[0][0], -Infinity);
+  // on real boards without Wide gaps nothing ever merges, so ordinary play is unchanged
+  for (let seed = 1; seed <= 30; seed++) { const t = makeTrack(seed); for (let i = 0; i < 300; i++) assert.equal(openings(t.bar(i), 1).length, t.bar(i).gaps.length); }
 });

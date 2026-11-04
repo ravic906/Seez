@@ -1,7 +1,7 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
   TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, POWERS, speedAt,
-  newRun, step, makeTrack, pickGhosts, ghostX, ghostCanHit, encodeXs, decodeXs,
+  newRun, step, makeTrack, pickGhosts, ghostX, ghostCanHit, openings, encodeXs, decodeXs,
 } from './core.js';
 import {
   PAL, makeStars, drawSpace, drawGirder, drawIcon, drawBot, drawCrew, drawFriend, drawAlien, drawShot,
@@ -355,12 +355,12 @@ function drawGame(dt) {
     if (y > cssH + 60) continue;
     let from = 0;
     const h = BAR_T * scale;
-    for (const g of b.gaps) {
-      const a = Math.max(0, g.c - (g.w * widen) / 2), z = Math.min(1, g.c + (g.w * widen) / 2);
-      if (a > from) drawGirder(ctx, sx(from), sx(a), y, h, t, b.tough); // widened gaps can meet: draw no plate between
+    for (const [a0, z0] of openings(b, widen)) { // exactly the plates the rules treat as solid
+      const a = Math.max(0, a0), z = Math.min(1, z0);
+      if (a > from) drawGirder(ctx, sx(from), sx(a), y, h, t, b.tough);
       from = Math.max(from, z);
     }
-    drawGirder(ctx, sx(from), sx(1), y, h, t, b.tough);
+    if (from < 1) drawGirder(ctx, sx(from), sx(1), y, h, t, b.tough);
     const sn = track.snail(i);
     if (sn) {
       const fireY = PY - FIRE_DIST;

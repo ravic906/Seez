@@ -382,8 +382,12 @@ export function applyMove(run, x) {
   const y = run.D - b.d;
   if (y + BAR_T / 2 > PY - PR && y - BAR_T / 2 < PY + PR) {
     if (run.phase !== run.next) {
-      const mg = pw === 'phase' ? -1 : gapMargin(b, x, pr, pw === 'widen' ? WIDEN_MULT : 1);
-      if (mg >= 0) run.margin = Math.min(run.margin, mg);
+      // A hit uses a round hitbox, like the bot you see (a corner you visibly miss is a miss). The graze
+      // margin is still measured sideways only, as it always was, so scores of saved runs replay the same;
+      // a corner you skim past counts as a graze.
+      const wm = pw === 'widen' ? WIDEN_MULT : 1;
+      const mg = pw === 'phase' ? -1 : barClearance(b, x, pr, wm, Math.abs(PY - y) - BAR_T / 2);
+      if (mg >= 0) run.margin = Math.min(run.margin, Math.max(0, barClearance(b, x, pr, wm, 0)));
       else if (pw === 'phase') { run.phase = run.next; run.margin = Infinity; }
       else if (run.bubble > 0) { run.bubble = 0; run.invuln = INVULN_TICKS + 1; run.phase = run.next; run.margin = Infinity; events.push('absorb'); }
       else { run.alive = false; run.cause = 'bar'; events.push('die'); return events; }
@@ -486,6 +490,41 @@ export function verifyRun(seed, xs, claimedScore) {
   const out = { ok: true, score: run.score, bars: run.passed, grazes: run.grazes, ticks: xs.length, friends: run.friends };
   if (claimedScore !== undefined && claimedScore !== run.score) return { ...out, ok: false, reason: 'score' };
   return out;
+}
+
+// The open stretches of a bar. Gaps that (widened) meet or leave a sliver of plate thinner than
+// MIN_PLATE between them are one opening, and a sliver against a wall is open too: a plate too thin to
+// see is never solid. Without Wide gaps nothing merges (gaps are always further apart than that).
+export const MIN_PLATE = 0.02;
+export function openings(bar, widen = 1) {
+  const out = [];
+  for (const g of bar.gaps) {
+    let a = g.c - (g.w * widen) / 2, z = g.c + (g.w * widen) / 2;
+    if (a < MIN_PLATE) a = -Infinity;
+    if (z > W - MIN_PLATE) z = Infinity;
+    const last = out.at(-1);
+    if (last && a - last[1] < MIN_PLATE) last[1] = Math.max(last[1], z);
+    else out.push([a, z]);
+  }
+  return out;
+}
+
+// Clearance between your round hitbox (centre x on your row, radius pr) and the nearest solid plate of
+// a bar whose edge is dy above or below your row (dy <= 0: level with you). Negative means a hit.
+// Level with you this is exactly gapMargin (the room to the edges of your gap), so grazes are unchanged.
+export function barClearance(bar, x, pr, widen = 1, dy = 0) {
+  const op = openings(bar, widen), vy = Math.max(0, dy);
+  let best = Infinity, from = -Infinity;
+  for (const [a, z] of [...op, [Infinity, Infinity]]) {
+    if (a > from) { // a solid plate from `from` to `a`
+      const dx = Math.max(from - x, 0, x - a);
+      // centre over the plate: the gap above or below it; centre beside it: straight-line distance to its corner or edge
+      const d = dx > 0 ? Math.hypot(dx, vy) : vy > 0 ? vy : -Math.min(x - from, a - x);
+      best = Math.min(best, d - pr);
+    }
+    from = z;
+  }
+  return best;
 }
 
 // How much room you have to the edges of the gap you are in (negative = you hit the bar).
