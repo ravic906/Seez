@@ -53,11 +53,11 @@ export const CREW_MID_SCORE = 1500;
 export const CREW_FULL_SCORE = 2500;
 // Upgrades for your bot, earned on each board at the same steps as the crew (upgrade level = crew level):
 //  1 (from 700):   every run starts with a Shield bubble that waits up to START_BUBBLE_TICKS (30 s);
-//  2 (from 1,500): you slide UPGRADE_LAT_MULT (10%) faster;
+//  2 (from 1,500): you slide UPGRADE_LAT_MULT (5%) faster;
 //  3 (from 2,500): a 4th suit cell.
 // They change how a run plays, so a saved run records its upgrade level and the replay check uses it.
 export const START_BUBBLE_TICKS = 1800;
-export const UPGRADE_LAT_MULT = 1.1;
+export const UPGRADE_LAT_MULT = 1.05; // +10% made level 2 easier than no crew at all for a quick, precise player
 export const maxHearts = (run) => HEARTS + (run.up >= 3 ? 1 : 0);
 export const EASE_ARMED_TICKS = 240;
 export const MID_ARMED_TICKS = 420; // level 2: the captain is dangerous for the first 7 s of its visits
@@ -334,12 +334,12 @@ export function newRun(track, ghosts = [], startX = 0.5, up = null) {
     track, ghosts, tick: 0, pt: 0, ptPrev: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
     hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0), mustLeave: ghosts.map(() => false), hitAt: ghosts.map(() => -1e9),
-    power: null, powerLeft: 0, bubble: 0, invuln: 0, phase: -1, nf: 0, friends: 0,
+    power: null, powerLeft: 0, bubble: 0, bubbleMax: 0, invuln: 0, phase: -1, nf: 0, friends: 0,
     ns: 0, shots: [], shotId: 0, lenient: false,
   };
   if (!Number.isInteger(run.up) || run.up < 0 || run.up > 3) run.up = 0;
   run.hearts = maxHearts(run);                              // a 4th suit cell from upgrade 3
-  if (run.up >= 1) run.bubble = START_BUBBLE_TICKS + 1;     // start with a Shield bubble from upgrade 1
+  if (run.up >= 1) run.bubble = run.bubbleMax = START_BUBBLE_TICKS + 1; // start with a Shield bubble from upgrade 1
   return run;
 }
 
@@ -375,7 +375,10 @@ export function applyMove(run, x) {
   else if (Math.abs(yf - PY) < pr + FR && Math.abs(x - f.x) < pr + FR) {
     run.nf++; run.friends++;
     // Timers start one tick high because they count down at the end of this same tick.
-    if (f.kind === 'shield') { run.bubble = BUBBLE_TICKS + 1; events.push('bubble'); }
+    if (f.kind === 'shield') { // a fresh bubble, unless the one you have would wait longer (the start Shield)
+      if (run.bubble < BUBBLE_TICKS + 1) run.bubble = run.bubbleMax = BUBBLE_TICKS + 1;
+      events.push('bubble');
+    }
     else if (f.kind === 'heal') {
       // At full cells it gives a safe window against hits instead of a bubble: a bubble also saves you from
       // a bar, and a replay (which cannot see your ghost hits) could not tell whether you were full.
@@ -632,7 +635,7 @@ function barNear(run) {
 export function alignGhost(track, ghost) {
   if (!track.tickAt || !ghost.xs?.length || ghost.atTrack === track) return ghost;
   const xs = ghost.xs, at = new Uint16Array(xs.length);
-  const r = newRun(track, [], xs[0] / 65535);
+  const r = newRun(track, [], xs[0] / 65535, ghost.u ?? 0); // with the upgrades it was flown with
   r.lenient = true;
   let pt = 0;
   for (let t = 0; t < xs.length; t++) {

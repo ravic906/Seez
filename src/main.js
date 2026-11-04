@@ -1,7 +1,7 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
   TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, maxHearts, BLAST_R, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, JOIN_GRACE, POWERS, speedAt,
-  newRun, step, makeTrack, pickGhosts, ghostX, ghostCanHit, openings, crewLevelFor, crewMayHurtAt, encodeXs, decodeXs,
+  newRun, step, makeTrack, pickGhosts, verifyRun, ghostX, ghostCanHit, openings, crewLevelFor, crewMayHurtAt, encodeXs, decodeXs,
 } from './core.js';
 import {
   PAL, makeStars, drawSpace, drawGirder, drawIcon, drawBot, drawCrew, drawFriend, drawAlien, drawShot,
@@ -51,13 +51,34 @@ const sy = (y) => baseY + (y - PY) * scale;
 
 // ---------- boards, ghosts, flow ----------
 
-const crewRuns = () => runsFor(store, seed).flatMap((r) => { try { return [{ xs: decodeXs(r.x), score: r.s }]; } catch { return []; } });
+// Saved runs are only trusted if they replay to their score (with the upgrades they were flown with), so
+// a fake best typed into storage can neither unlock upgrades nor arm the crew. Results are remembered.
+const checked = new Map();
+function runHolds(r) {
+  const key = `${seed}:${r.t}:${r.s}:${r.u ?? 0}:${r.x.length}`;
+  if (!checked.has(key)) {
+    let ok = false;
+    try { const v = verifyRun(seed, decodeXs(r.x), undefined, r.u ?? 0); ok = v.ok && v.score === r.s; } catch { ok = false; }
+    checked.set(key, ok);
+  }
+  return checked.get(key);
+}
+const trustedRuns = () => runsFor(store, seed).filter(runHolds);
+const crewRuns = () => trustedRuns().flatMap((r) => { try { return [{ xs: decodeXs(r.x), score: r.s, u: r.u ?? 0 }]; } catch { return []; } });
 const ghostsNow = () => pickGhosts(crewRuns());
-const bestScore = () => store.boards?.[seed]?.best?.s ?? 0;
+const bestScore = () => Math.max(0, ...trustedRuns().map((r) => r.s));
+// The leaderboard gets your best run on this board (not just the last one): a best that never reached
+// it (offline, a failed post) goes up the next time, so a later, smaller run never stands in for it.
+function bestToPost() {
+  const b = trustedRuns().reduce((a, r) => (!a || r.s > a.s ? r : a), null);
+  if (!b) return null;
+  const v = verifyRun(seed, decodeXs(b.x), undefined, b.u ?? 0);
+  return { s: b.s, bars: v.bars, grazes: v.grazes, ticks: v.ticks, x: b.x, u: b.u ?? 0 };
+}
 // What the crew can do on this board at each level (see crewMayHurtAt in core.js).
 // Your bot's upgrades on this board, earned at the same steps (see START_BUBBLE_TICKS in core.js).
-const UPGRADE_TEXT = ['', 'you start with a Shield', 'you start with a Shield and slide 10% faster', 'you start with a Shield, slide 10% faster and have a 4th suit cell'];
-const UPGRADE_NEW = ['', 'a Shield at the start of every run', 'faster sliding (10%)', 'a 4th suit cell'];
+const UPGRADE_TEXT = ['', 'you start with a Shield', 'you start with a Shield and slide 5% faster', 'you start with a Shield, slide 5% faster and have a 4th suit cell'];
+const UPGRADE_NEW = ['', 'a Shield at the start of every run', 'faster sliding (5%)', 'a 4th suit cell'];
 const CREW_TEXT = [
   'the crew only watch',
   'the captain can hurt you for the first 4 s of its visits',
@@ -124,7 +145,8 @@ function endRun() {
   if (after > before) $('over-why').textContent += ` From now on, ${CREW_TEXT[after]} on this board, and your bot earns ${UPGRADE_NEW.slice(before + 1, after + 1).join(' and ')}.`;
   $('over-rank').hidden = true;
   $('board').textContent = `${boardLabel(seed)} · best ${Math.max(prevBest, score)}`;
-  if (board && score > 0) postAndRank({ s: score, bars, grazes, ticks: xs.length, x: encodeXs(xs), u: run.up }, runToken);
+  const toPost = board && score > 0 ? bestToPost() : null;
+  if (toPost) postAndRank(toPost, runToken);
 }
 
 async function postAndRank(res, token) {
@@ -281,7 +303,7 @@ function buildGuide() {
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
   guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. They are eased in, board by board, from your best score there: under 700 they only watch; from 700 the captain (gold) can hurt you for the first 4 s of its visits; from 1,500 the captain for the first 7 s and your last flight (blue) for the first 4 s of its visits; from 2,500 the whole crew all visit long. The start screen tells you which. A touch costs a suit cell, then you get a safe moment. Move off that ghost: it cannot touch you again until you have. Only the crew (gold and blue) can hurt you.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
-  guideRow(basics, guideIcon((g) => drawIcon(g, 'shield', 17, 17, 9, '#9fe6ff')), 'Upgrades', 'Your bot grows with you, board by board, at the same steps as the crew: from 700 every run starts with a Shield, from 1,500 you slide 10% faster, from 2,500 you get a 4th suit cell. The start screen shows what you have.');
+  guideRow(basics, guideIcon((g) => drawIcon(g, 'shield', 17, 17, 9, '#9fe6ff')), 'Upgrades', 'Your bot grows with you, board by board, at the same steps as the crew: from 700 every run starts with a Shield, from 1,500 you slide 5% faster, from 2,500 you get a 4th suit cell. The start screen shows what you have.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Alien snails', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
   guideRow(aliens, shot('hammer'), 'Hammer', 'Thrown straight at where you were.');
@@ -323,7 +345,7 @@ function setChips(r) {
   } else chipKind = null;
   const sh = r && r.bubble > 0;
   if ($('chip-shield').hidden === sh) { $('chip-shield').hidden = !sh; if (sh) paintChip('chip-shield-icon', 'shield'); }
-  if (sh) $('chip-shield-fill').style.width = `${Math.min(100, (100 * r.bubble) / BUBBLE_TICKS)}%`;
+  if (sh) $('chip-shield-fill').style.width = `${Math.min(100, (100 * r.bubble) / (r.bubbleMax || BUBBLE_TICKS))}%`; // against this bubble's own length
 }
 
 // ---------- effects ----------

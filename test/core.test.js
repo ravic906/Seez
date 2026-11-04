@@ -911,3 +911,27 @@ test('a run flown with upgrades verifies only with them, and cannot claim more t
   }
   assert.equal(checked, 2, 'found two honest upgraded runs to check');
 });
+
+test('a ghost flown with upgrades is lined up with the same upgrades, so its wreckage clock matches its run', () => {
+  let n = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const track = makeTrack(seed);
+    const r = playBot(track, [ghostFrom(0.95, 5, 'best', GHOST_ARM_SCORE)], { seed, shake: 0.03, reaction: 14, maxTicks: 6000 }); // up 1: start Shield
+    if (r.up !== 1) continue;
+    const g = alignGhost(track, { xs: r.xs.slice(), u: 1 });
+    assert.equal(g.at.length, r.pt, `seed ${seed}: the ghost's wreckage clock ends where its run did`);
+    assert.equal(ghostX(g, r.pt), r.xs.at(-1) / 65535);
+    n++;
+  }
+  assert.ok(n >= 20, 'checked many upgraded runs');
+});
+
+test('a Shield helper never replaces a start Shield that would wait longer', () => {
+  const run = coreNewRun(fixedTrack([{ c: 0.5, w: 1 }], friendAt(30, 0.5, 'shield')), [], 0.5, 1);
+  while (run.nf < 1 && run.tick < 200) step(run, 0.5);
+  assert.ok(run.bubble > BUBBLE_TICKS + 1, 'the long start Shield is kept');
+  assert.equal(run.bubbleMax, START_BUBBLE_TICKS + 1);
+  const plain = coreNewRun(fixedTrack([{ c: 0.5, w: 1 }], friendAt(30, 0.5, 'shield')), [], 0.5, 0);
+  while (plain.nf < 1 && plain.tick < 200) step(plain, 0.5);
+  assert.equal(plain.bubble, BUBBLE_TICKS, 'without one, the helper gives a fresh bubble');
+});
