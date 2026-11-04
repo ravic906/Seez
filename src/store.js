@@ -15,7 +15,7 @@ export function sanitizeStore(raw) {
   const run = (r) => {
     if (!r || typeof r !== 'object' || !Number.isFinite(r.s) || typeof r.x !== 'string' || !r.x || r.x.length > 200000) return null;
     try { if (atob(r.x).length % 2) return null; } catch { return null; }
-    return { s: r.s, x: r.x, t: Number.isFinite(r.t) ? r.t : 0 };
+    return { s: r.s, x: r.x, t: Number.isFinite(r.t) ? r.t : 0, u: Number.isInteger(r.u) && r.u >= 0 && r.u <= 3 ? r.u : 0 };
   };
   const boards = raw.boards && typeof raw.boards === 'object' && !Array.isArray(raw.boards) ? raw.boards : {};
   for (const [k, b] of Object.entries(boards)) {

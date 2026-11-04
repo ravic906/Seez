@@ -61,7 +61,7 @@ const withRanks = (list) => {
 export const rank = (entries) => withRanks([...entries].sort((a, b) => b.s - a.s || (a.t ?? 0) - (b.t ?? 0) || (a.uid < b.uid ? -1 : 1)));
 
 // Walk down the ranking, replaying each saved run, until `limit` verified rows are found.
-// `fetchRun(uid, seed)` -> { x, s } or null, `verify(seed, xs, score)` -> { ok }.
+// `fetchRun(uid, seed)` -> { x, s, u } or null, `verify(seed, xs, score, upgrades)` -> { ok }.
 // Anything that fails to replay is simply left out. Results are remembered in `cache`.
 // `mine` is the player's own verified row even when they are below the top list (rank null then).
 export async function verifiedTop(ranked, { limit = TOP, fetchRun, verify, decode, cache = new Map(), wantUid = null }) {
@@ -73,7 +73,7 @@ export async function verifiedTop(ranked, { limit = TOP, fetchRun, verify, decod
     let ok = false;
     try {
       const run = await fetchRun(e.uid, e.seed);
-      ok = !!run && run.s === e.s && verify(e.seed, decode(run.x), e.s).ok === true;
+      ok = !!run && run.s === e.s && verify(e.seed, decode(run.x), e.s, run.u ?? 0).ok === true; // with the upgrades it was flown with
     } catch { ok = false; }
     cache.set(key, ok);
     return ok;

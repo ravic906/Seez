@@ -68,7 +68,7 @@ export function createBoard(conn, { today, getHandle }) {
         const data = snap.exists ? snap.data() : {};
         if (!beats(data.boards?.[seed], run.s)) return { posted: false, reason: 'not-better' };
         const t = Date.now();
-        await conn.db.doc(`scores/${conn.uid}/runs/${seed}`).set({ x: run.x, s: run.s, t });
+        await conn.db.doc(`scores/${conn.uid}/runs/${seed}`).set({ x: run.x, s: run.s, t, u: run.u ?? 0 });
         const merged = mergeBoard(data.boards ?? {}, seed, { s: run.s, bars: run.bars, grazes: run.grazes, ticks: run.ticks, t }, today());
         await doc.set({ handle: getHandle(), boards: merged.boards });
         for (const old of merged.dropped) await conn.db.doc(`scores/${conn.uid}/runs/${old}`).delete();

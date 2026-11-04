@@ -53,7 +53,9 @@ test('damaged or foreign storage is rebuilt into a clean store instead of breaki
   assert.equal(store.handle, 'Lone'); assert.equal(store.seed, 20261103); assert.equal(store.sound, false); assert.equal(store.introSeen, true);
   assert.equal(store.extra, undefined);
   assert.deepEqual(Object.keys(store.boards), ['7'], 'only boards with a usable run survive');
-  assert.deepEqual(store.boards[7].recent, [good], 'bad runs are dropped, good ones kept');
+  assert.deepEqual(store.boards[7].recent, [{ ...good, u: 0 }], 'bad runs are dropped, good ones kept (no upgrade level saved: none)');
+  const up = sanitizeStore({ boards: { 7: { recent: [{ ...good, u: 2 }, { ...good, u: 9 }], best: null } } });
+  assert.deepEqual(up.boards[7].recent.map((r) => r.u), [2, 0], 'an upgrade level is kept, a nonsense one becomes 0');
   assert.equal(store.boards[7].best.s, 50);
   assert.deepEqual(sanitizeStore({ seed: 1.5, handle: 7, sound: 'yes' }), clean, 'wrong types are ignored');
   assert.equal(runsFor({ boards: { 1: { recent: 'oops', best: good } } }, 1).length, 1, 'a damaged recent list does not throw');

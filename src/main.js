@@ -1,6 +1,6 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, JOIN_GRACE, POWERS, speedAt,
+  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, maxHearts, BLAST_R, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, JOIN_GRACE, POWERS, speedAt,
   newRun, step, makeTrack, pickGhosts, ghostX, ghostCanHit, openings, crewLevelFor, crewMayHurtAt, encodeXs, decodeXs,
 } from './core.js';
 import {
@@ -55,6 +55,9 @@ const crewRuns = () => runsFor(store, seed).flatMap((r) => { try { return [{ xs:
 const ghostsNow = () => pickGhosts(crewRuns());
 const bestScore = () => store.boards?.[seed]?.best?.s ?? 0;
 // What the crew can do on this board at each level (see crewMayHurtAt in core.js).
+// Your bot's upgrades on this board, earned at the same steps (see START_BUBBLE_TICKS in core.js).
+const UPGRADE_TEXT = ['', 'you start with a Shield', 'you start with a Shield and slide 10% faster', 'you start with a Shield, slide 10% faster and have a 4th suit cell'];
+const UPGRADE_NEW = ['', 'a Shield at the start of every run', 'faster sliding (10%)', 'a 4th suit cell'];
 const CREW_TEXT = [
   'the crew only watch',
   'the captain can hurt you for the first 4 s of its visits',
@@ -77,11 +80,11 @@ function showReady() {
   const n = ghosts.length;
   const lvl = crewLevelFor({ score: bestScore() }), next = [GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE][lvl];
   $('start-hint').textContent = n === 0 ? 'Touch anywhere to start.'
-    : `The crew will find you 10 to 15 seconds in. On this board ${CREW_TEXT[lvl]}${next ? ` (until you score ${next})` : ''}. Touch anywhere to start.`;
+    : `The crew will find you 10 to 15 seconds in. On this board ${CREW_TEXT[lvl]}${next ? ` (until you score ${next})` : ''}.${lvl ? ` Your bot: ${UPGRADE_TEXT[lvl]}.` : ''} Touch anywhere to start.`;
   const best = bestScore();
   $('board').textContent = `${boardLabel(seed)}${best ? ` · best ${best}` : ''}`;
   $('score').textContent = '0'; $('status').textContent = '';
-  setHearts(HEARTS); setChips(null); lastMood = null; sound.mood(null);
+  setHearts(HEARTS + (lvl >= 3 ? 1 : 0), HEARTS + (lvl >= 3 ? 1 : 0)); setChips(null); lastMood = null; sound.mood(null);
   renderLegend();
   $('start-board').hidden = !board; $('over-board').hidden = !board;
 }
@@ -106,7 +109,7 @@ function endRun() {
   state = 'dying'; overAt = clock + 0.7; shake = 1; flash = { c: '255,200,120', a: 0.5 };
   const prevBest = bestScore();
   const isBest = run.score > prevBest;
-  if (run.score > 0) store = recordRun(store, seed, { s: run.score, x: encodeXs(run.xs), t: Date.now() });
+  if (run.score > 0) store = recordRun(store, seed, { s: run.score, x: encodeXs(run.xs), t: Date.now(), u: run.up });
   saveStore(store);
   burst(sx(run.x), sy(PY), '#ffd9a0', 30);
   sound.die(); navigator.vibrate?.(60);
@@ -118,10 +121,10 @@ function endRun() {
   $('over-why').textContent = WHY[cause] ?? '';
   // the first time a run on this board reaches GHOST_ARM_SCORE, say that the crew will fight back
   const before = crewLevelFor({ score: prevBest }), after = crewLevelFor({ score });
-  if (after > before) $('over-why').textContent += ` From now on, ${CREW_TEXT[after]} on this board.`;
+  if (after > before) $('over-why').textContent += ` From now on, ${CREW_TEXT[after]} on this board, and your bot earns ${UPGRADE_NEW.slice(before + 1, after + 1).join(' and ')}.`;
   $('over-rank').hidden = true;
   $('board').textContent = `${boardLabel(seed)} · best ${Math.max(prevBest, score)}`;
-  if (board && score > 0) postAndRank({ s: score, bars, grazes, ticks: xs.length, x: encodeXs(xs) }, runToken);
+  if (board && score > 0) postAndRank({ s: score, bars, grazes, ticks: xs.length, x: encodeXs(xs), u: run.up }, runToken);
 }
 
 async function postAndRank(res, token) {
@@ -278,6 +281,7 @@ function buildGuide() {
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
   guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. They are eased in, board by board, from your best score there: under 700 they only watch; from 700 the captain (gold) can hurt you for the first 4 s of its visits; from 1,500 the captain for the first 7 s and your last flight (blue) for the first 4 s of its visits; from 2,500 the whole crew all visit long. The start screen tells you which. A touch costs a suit cell, then you get a safe moment. Move off that ghost: it cannot touch you again until you have. Only the crew (gold and blue) can hurt you.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
+  guideRow(basics, guideIcon((g) => drawIcon(g, 'shield', 17, 17, 9, '#9fe6ff')), 'Upgrades', 'Your bot grows with you, board by board, at the same steps as the crew: from 700 every run starts with a Shield, from 1,500 you slide 10% faster, from 2,500 you get a 4th suit cell. The start screen shows what you have.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Alien snails', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
   guideRow(aliens, shot('hammer'), 'Hammer', 'Thrown straight at where you were.');
@@ -295,8 +299,13 @@ $('start-guide').addEventListener('click', openGuide);
 // ---------- hearts and chips ----------
 
 const heartEls = [...document.querySelectorAll('#hearts svg')];
-let heartsShown = -1;
-function setHearts(n) { if (n === heartsShown) return; heartsShown = n; heartEls.forEach((el, i) => el.classList.toggle('lost', i >= n)); }
+let heartsMax = HEARTS, heartsShown = -1;
+// n cells left out of max (a 4th cell is an upgrade, so the 4th heart only shows when you have it)
+function setHearts(n, max = HEARTS) {
+  if (n === heartsShown && max === heartsMax) return;
+  heartsShown = n; heartsMax = max;
+  heartEls.forEach((el, i) => { el.toggleAttribute('hidden', i >= max); el.classList.toggle('lost', i >= n); }); // svg has no .hidden property
+}
 
 let chipKind = null;
 function paintChip(canvasId, kind) {
@@ -534,7 +543,7 @@ function frame(ts) {
         acc -= TICK;
       }
       $('score').textContent = run.score;
-      setHearts(run.hearts); setChips(run);
+      setHearts(run.hearts, maxHearts(run)); setChips(run);
       if (run.power !== lastMood) { lastMood = run.power; sound.mood(run.power); }
       $('status').textContent = threatLabel(run);
       if (!run.alive) endRun();

@@ -51,6 +51,14 @@ export const GHOST_ARM_SCORE = 700;
 // 77/60/45%, regular 87/62/38%. With the captain dangerous all visit, level 2 was no easier than level 3.
 export const CREW_MID_SCORE = 1500;
 export const CREW_FULL_SCORE = 2500;
+// Upgrades for your bot, earned on each board at the same steps as the crew (upgrade level = crew level):
+//  1 (from 700):   every run starts with a Shield bubble that waits up to START_BUBBLE_TICKS (30 s);
+//  2 (from 1,500): you slide UPGRADE_LAT_MULT (10%) faster;
+//  3 (from 2,500): a 4th suit cell.
+// They change how a run plays, so a saved run records its upgrade level and the replay check uses it.
+export const START_BUBBLE_TICKS = 1800;
+export const UPGRADE_LAT_MULT = 1.1;
+export const maxHearts = (run) => HEARTS + (run.up >= 3 ? 1 : 0);
 export const EASE_ARMED_TICKS = 240;
 export const MID_ARMED_TICKS = 420; // level 2: the captain is dangerous for the first 7 s of its visits
 
@@ -315,11 +323,13 @@ export function crewLevelFor(best) {
   return s >= CREW_FULL_SCORE ? 3 : s >= CREW_MID_SCORE ? 2 : s >= GHOST_ARM_SCORE ? 1 : 0;
 }
 
-export function newRun(track, ghosts = [], startX = 0.5) {
+// `up`: the upgrade level for this run (0..3); by default the one earned on this board (the captain's score).
+export function newRun(track, ghosts = [], startX = 0.5, up = null) {
   for (const g of ghosts) alignGhost(track, g);
   const best = ghosts.find((g) => g.kind === 'best') ?? ghosts[0];
-  return {
+  const run = {
     crewLevel: crewLevelFor(best), // 0 watching, 1 and 2 eased in, 3 the whole crew
+    up: up ?? crewLevelFor(best),
     get crewArmed() { return this.crewLevel > 0; },
     track, ghosts, tick: 0, pt: 0, ptPrev: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
@@ -327,10 +337,14 @@ export function newRun(track, ghosts = [], startX = 0.5) {
     power: null, powerLeft: 0, bubble: 0, invuln: 0, phase: -1, nf: 0, friends: 0,
     ns: 0, shots: [], shotId: 0, lenient: false,
   };
+  if (!Number.isInteger(run.up) || run.up < 0 || run.up > 3) run.up = 0;
+  run.hearts = maxHearts(run);                              // a 4th suit cell from upgrade 3
+  if (run.up >= 1) run.bubble = START_BUBBLE_TICKS + 1;     // start with a Shield bubble from upgrade 1
+  return run;
 }
 
 // Sideways speed limit for this tick (Nitro raises it).
-export const maxMove = (run) => LAT * TICK * (run.power === 'nitro' ? NITRO_MULT : 1);
+export const maxMove = (run) => LAT * TICK * (run.power === 'nitro' ? NITRO_MULT : 1) * (run.up >= 2 ? UPGRADE_LAT_MULT : 1);
 
 // Advance one tick toward `targetX` (0..1). Returns this tick's events: 'pass', 'graze',
 // 'hurt', 'nitro', 'bubble', 'absorb' and 'die'. Does nothing once the run is over.
@@ -365,7 +379,7 @@ export function applyMove(run, x) {
     else if (f.kind === 'heal') {
       // At full cells it gives a safe window against hits instead of a bubble: a bubble also saves you from
       // a bar, and a replay (which cannot see your ghost hits) could not tell whether you were full.
-      if (run.hearts < HEARTS) run.hearts++; else run.invuln = HEAL_SAFE_TICKS + 1;
+      if (run.hearts < maxHearts(run)) run.hearts++; else run.invuln = HEAL_SAFE_TICKS + 1;
       events.push('heal');
     } else { run.power = f.kind; run.powerLeft = POWERS[f.kind].ticks + 1; events.push(`power:${f.kind}`); }
   }
@@ -506,17 +520,21 @@ function updateShots(run, events, pr, pw) {
 // Check a saved run by replaying it on the board it claims: every move must be legal
 // (within the speed limit, Nitro included) and must reproduce the score exactly.
 // Ghosts are left out, so a run that survived with ghosts is judged on the bars alone.
-export function verifyRun(seed, xs, claimedScore) {
+// `up` is the upgrade level the run was flown with; it can be no higher than its own score earns
+// (you only earn upgrades on a board by scoring there, and the posted run is your best on it).
+export function verifyRun(seed, xs, claimedScore, up = 0) {
   if (!Array.isArray(xs) || !xs.length || xs.length > MAX_TICKS) return { ok: false, reason: 'length' };
+  if (!Number.isInteger(up) || up < 0 || up > 3) return { ok: false, reason: 'upgrades' };
+  if (claimedScore !== undefined && up > crewLevelFor({ score: claimedScore })) return { ok: false, reason: 'upgrades' };
   for (let i = 0; i < xs.length; i++) { // a plain loop: .some() skips the holes of a sparse array
     const v = xs[i];
     if (!Number.isInteger(v) || v < 0 || v > 65535) return { ok: false, reason: 'values' };
   }
-  const run = newRun(makeTrack(seed), [], xs[0] / 65535);
+  const run = newRun(makeTrack(seed), [], xs[0] / 65535, up);
   // A replay has no ghosts, so it cannot tell what they cost the player or which shots their safe moments
   // absorbed. It does judge the aliens' shots, which depend only on where the player stood, with a few
   // spare hearts for that difference. Ignoring the aliens would end a replay long before a high score.
-  run.hearts = HEARTS + REPLAY_SPARE_HEARTS;
+  run.hearts = maxHearts(run) + REPLAY_SPARE_HEARTS;
   let prev = null, before = null;
   for (let t = 0; t < xs.length; t++) {
     const x = xs[t] / 65535;

@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, barClearance, openings, verifyRun, speedAt,
+  makeTrack, newRun as coreNewRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, barClearance, openings, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
-  GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, EASE_ARMED_TICKS, MID_ARMED_TICKS, crewMayHurtAt, NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
+  START_BUBBLE_TICKS, UPGRADE_LAT_MULT, maxHearts, GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, EASE_ARMED_TICKS, MID_ARMED_TICKS, crewMayHurtAt, NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
   TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_STAY_BOTH, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
+// Rule tests run without the bot's upgrades unless a test asks for them (the upgrade tests at the end do).
+const newRun = (track, ghosts = [], startX = 0.5, up = 0) => coreNewRun(track, ghosts, startX, up);
 
 const SNAIL = (kind, x = 0.3) => (i) => (i === 0 ? { bar: 0, x, kind } : null);
 const FAR = { id: 99, bar: 999, d: 1e9, x: 0.5, kind: 'nitro' };
@@ -882,4 +884,30 @@ test('the crew are eased in: captain 4 s (700), captain 7 s + last flight 4 s (C
   assert.equal(crewMayHurtAt(2, 0, MID_ARMED_TICKS - 1), true);
   assert.equal(crewMayHurtAt(2, 0, MID_ARMED_TICKS), false);
   assert.equal(hitsAt(GHOST_ARM_SCORE - 1, 0.3).hits.length, 0, 'below 700 they only watch');
+});
+
+test('upgrades follow your best score on the board: Shield at the start (700), faster sliding (1,500), a 4th cell (2,500)', () => {
+  const run = (score) => coreNewRun(wide, score === null ? [] : [ghostFrom(0.9, 10, 'best', score)], 0.5);
+  const none = run(null), u1 = run(GHOST_ARM_SCORE), u2 = run(CREW_MID_SCORE), u3 = run(CREW_FULL_SCORE);
+  assert.deepEqual([none.up, run(GHOST_ARM_SCORE - 1).up, u1.up, u2.up, u3.up], [0, 0, 1, 2, 3]);
+  assert.equal(none.bubble, 0);
+  assert.equal(u1.bubble, START_BUBBLE_TICKS + 1, 'upgrade 1: a Shield bubble waiting from the start');
+  assert.ok(Math.abs(maxMove(u2) / maxMove(u1) - UPGRADE_LAT_MULT) < 1e-12, 'upgrade 2: 10% faster sliding');
+  assert.deepEqual([u2.hearts, u3.hearts, maxHearts(u3)], [HEARTS, HEARTS + 1, HEARTS + 1], 'upgrade 3: a 4th cell, and Repair can refill it');
+});
+
+test('a run flown with upgrades verifies only with them, and cannot claim more than its own score earns', () => {
+  // honest runs flown with upgrade 2 (a captain whose run ends at once, so it never arrives)
+  let checked = 0;
+  for (let seed = 1; seed <= 80 && checked < 2; seed++) {
+    const r = playBot(makeTrack(seed), [ghostFrom(0.95, 5, 'best', CREW_MID_SCORE)], { seed, shake: 0.004, reaction: 4, maxTicks: 14400 });
+    if (r.up !== 2 || r.score < CREW_MID_SCORE) continue;
+    checked++;
+    assert.equal(verifyRun(seed, r.xs, r.score, 2).ok, true, `seed ${seed}: verifies with its upgrades`);
+    const plain = verifyRun(seed, r.xs, r.score, 0);
+    assert.ok(!plain.ok || plain.score !== r.score, 'not as a plain run');
+    assert.equal(verifyRun(seed, r.xs, 650, 1).reason, 'upgrades', 'a score of 650 cannot claim upgrade 1');
+    assert.equal(verifyRun(seed, r.xs, r.score, 7).reason, 'upgrades');
+  }
+  assert.equal(checked, 2, 'found two honest upgraded runs to check');
 });
