@@ -360,8 +360,8 @@ export function drawFriend(ctx, x, y, r, kind, t = 0) {
   const g = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 2.4);
   g.addColorStop(0, tc + '88'); g.addColorStop(1, tc + '00');
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 2.4, 0, TAU); ctx.fill();
-  // ghostly crewmate body, smiling
-  ctx.globalAlpha = 0.92; ctx.fillStyle = '#d9fff2';
+  // ghostly crewmate body, smiling (faint: the bubble it carries is what to look at)
+  ctx.globalAlpha = 0.6; ctx.fillStyle = '#d9fff2';
   ctx.beginPath(); ctx.moveTo(-R * 0.8, 0); ctx.lineTo(-R * 0.8, R * 1.0);
   for (let i = 0; i <= 3; i++) { const px = -R * 0.8 + (R * 1.6 * i) / 3; ctx.quadraticCurveTo(px - R * 0.22, R * (1.4 + 0.18 * Math.sin(t * 6 + i * 2)), px, R * 1.0); }
   ctx.lineTo(R * 0.8, 0); ctx.arc(0, 0, R * 0.8, 0, Math.PI, true); ctx.fill();
@@ -374,8 +374,11 @@ export function drawFriend(ctx, x, y, r, kind, t = 0) {
   ctx.globalAlpha = 1;
   const cy = -R * 2.0 + Math.sin(t * 4) * 2;
   ctx.fillStyle = 'rgba(8,14,40,0.9)'; ctx.strokeStyle = tc; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(0, cy, R * 0.82, 0, TAU); ctx.fill(); ctx.stroke();
-  drawIcon(ctx, kind, 0, cy, R * 0.5, tc);
+  ctx.beginPath(); ctx.arc(0, cy, R * 1.0, 0, TAU); ctx.fill(); ctx.stroke();
+  // a pulsing ring says 'collect me', unlike anything the crew or the aliens do
+  ctx.globalAlpha = 0.5 + 0.4 * Math.sin(t * 5); ctx.beginPath(); ctx.arc(0, cy, R * (1.25 + 0.12 * Math.sin(t * 5)), 0, TAU); ctx.stroke();
+  ctx.globalAlpha = 1;
+  drawIcon(ctx, kind, 0, cy, R * 0.6, tc);
   ctx.restore();
 }
 
@@ -448,7 +451,7 @@ export function drawShot(ctx, s, x, y, px, t, blastFrac = 1) {
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
     } else {
       if (s.mode === 'fuse') { // a pulsing blast-radius warning that closes in as the fuse burns down
-        const k = s.fuse / 30;
+        const k = Math.min(1, s.fuse / (s.fuseMax ?? 30)); // a longer fuse (wreckage passing) closes in just as smoothly
         ctx.strokeStyle = `rgba(255,77,94,${0.35 + 0.5 * (1 - k)})`; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
         ctx.beginPath(); ctx.arc(0, 0, BLAST_R * px, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = `rgba(255,77,94,${0.06 + 0.16 * (1 - k)})`; ctx.fill();

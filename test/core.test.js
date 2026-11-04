@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, barClearance, openings, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
-  NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
+  GHOST_ARM_SCORE, NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
   TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_STAY_BOTH, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
@@ -19,7 +19,8 @@ const fixedTrack = (gaps, friend = null, snail = () => null, visit = OPEN_VISIT)
 const wide = fixedTrack([{ c: 0.5, w: 1 }]);
 const runUntilDone = (run, target, max = 3000) => { for (let i = 0; i < max && run.alive; i++) step(run, target); return run; };
 const dAfter = (n) => { let D = 0; for (let i = 0; i < n; i++) D += speedAt(D) * TICK; return D; };
-const ghostFrom = (x, ticks, kind = 'recent') => ({ xs: Array(ticks).fill(Math.round(x * 65535)), kind, score: 1 });
+// Test ghosts score well above GHOST_ARM_SCORE, so the crew can hurt you (see the beginner test below).
+const ghostFrom = (x, ticks, kind = 'recent', score = 1e6) => ({ xs: Array(ticks).fill(Math.round(x * 65535)), kind, score });
 // Friend that crosses your row at tick `at`, wherever you stand.
 const friendAt = (at, x, kind) => ({ id: 0, bar: 0, d: dAfter(at) - PY, x, kind });
 
@@ -544,7 +545,7 @@ test('a ghost replays your earlier run exactly', () => {
   const inputs = (t) => 0.5 + 0.3 * Math.sin(t / 40);
   const first = newRun(wide, [], 0.5);
   for (let t = 0; t < 400; t++) step(first, inputs(t));
-  const ghost = { xs: first.xs, kind: 'recent', score: 0 };
+  const ghost = { xs: first.xs, kind: 'recent', score: 1e6 };
   const again = newRun(wide, [ghost], 0.5);
   const hits = [];
   for (let t = 1; t <= 400; t++) if (step(again, inputs(t - 1)).includes('hurt')) hits.push(t);
@@ -704,13 +705,13 @@ test('tight patches throw no hammers, and every tight bar that had a weapon in i
   assert.ok(weaponWeight('hammer', 50, false) > 0);
 });
 
-test('the fall speed ramps up over about 23 seconds', () => {
+test('the fall speed ramps up over about 46 seconds', () => {
   assert.equal(speedAt(0), 0.6);
-  assert.equal(speedAt(20), 1.2);
-  const D = dAfter(60 * 24);
-  assert.equal(speedAt(D), 1.2, 'at the top speed after 24 s');
-  assert.ok(speedAt(dAfter(60 * 21)) < 1.2, 'not quite there at 21 s');
-  assert.ok(speedAt(dAfter(60 * 10)) < 1.0, 'still well short of it after 10 s');
+  assert.equal(speedAt(40), 1.2);
+  const D = dAfter(60 * 47);
+  assert.equal(speedAt(D), 1.2, 'at the top speed after 47 s');
+  assert.ok(speedAt(dAfter(60 * 44)) < 1.2, 'not quite there at 44 s');
+  assert.ok(speedAt(dAfter(60 * 20)) < 0.9, 'still well short of it after 20 s');
 });
 
 test('Exorcise lets alien shots pass through you as well as ghosts', () => {
@@ -811,4 +812,35 @@ test('a sliver of plate too thin to see is never solid: with Wide gaps, gaps tha
   assert.equal(wall[0][0], -Infinity);
   // on real boards without Wide gaps nothing ever merges, so ordinary play is unchanged
   for (let seed = 1; seed <= 30; seed++) { const t = makeTrack(seed); for (let i = 0; i < 300; i++) assert.equal(openings(t.bar(i), 1).length, t.bar(i).gaps.length); }
+});
+
+test('beginners: until your best run on a board scores GHOST_ARM_SCORE, the crew only watch', () => {
+  const touch = (score) => {
+    const run = newRun(wide, [ghostFrom(0.5, 900, 'best', score)], 0.5);
+    let hurt = 0;
+    for (let t = 0; t < 900 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hurt++;
+    return { hurt, armed: run.crewArmed };
+  };
+  assert.deepEqual(touch(GHOST_ARM_SCORE - 10), { hurt: 0, armed: false }, 'a beginner flies straight through their own ghost');
+  assert.ok(touch(GHOST_ARM_SCORE).hurt > 0, 'once you have scored that much, it fights back');
+  assert.equal(newRun(wide, [], 0.5).crewArmed, false);
+  // the captain (best run) decides, even when a recent run scored more
+  const mixed = newRun(wide, [ghostFrom(0.5, 100, 'best', 50), ghostFrom(0.5, 100, 'recent', 1e6)], 0.5);
+  assert.equal(mixed.crewArmed, false);
+});
+
+test('a bomb never blasts while wreckage is crossing your row', () => {
+  for (let seed = 1; seed <= 40; seed++) {
+    const track = makeTrack(seed);
+    const run = newRun(track, [], 0.5); run.lenient = true;
+    while (run.alive && run.tick < 6000) {
+      const ev = step(run, track.bar(run.next).c);
+      if (ev.includes('boom')) {
+        for (let i = Math.max(0, run.next - 1); i <= run.next; i++) {
+          const y = run.D - track.bar(i).d;
+          assert.ok(!(y + BAR_T / 2 > PY - PR && y - BAR_T / 2 < PY + PR), `seed ${seed} tick ${run.tick}: bar ${i} is at your row`);
+        }
+      }
+    }
+  }
 });

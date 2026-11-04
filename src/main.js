@@ -1,6 +1,6 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, POWERS, speedAt,
+  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, POWERS, speedAt,
   newRun, step, makeTrack, pickGhosts, ghostX, ghostCanHit, openings, encodeXs, decodeXs,
 } from './core.js';
 import {
@@ -107,6 +107,8 @@ function endRun() {
   $('over-friends-s').lastChild.nodeValue = friends === 1 ? ' helper' : ' helpers';
   $('over-flag').textContent = isBest && score > 0 ? 'New best' : '';
   $('over-why').textContent = WHY[cause] ?? '';
+  // the first time a run on this board reaches GHOST_ARM_SCORE, say that the crew will fight back
+  if (prevBest < GHOST_ARM_SCORE && score >= GHOST_ARM_SCORE) $('over-why').textContent += ' From now on your crew can hurt you on this board.';
   $('over-rank').hidden = true;
   $('board').textContent = `${boardLabel(seed)} · best ${Math.max(prevBest, score)}`;
   if (board && score > 0) postAndRank({ s: score, bars, grazes, ticks: xs.length, x: encodeXs(xs) }, runToken);
@@ -264,7 +266,7 @@ function guideRow(list, icon, title, text) {
 function buildGuide() {
   const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
-  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. A touch costs a suit cell, then you get a safe moment. Move off that ghost: it cannot touch you again until you have.');
+  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. While you are new to a board they only watch; once one of your runs there scores 700, a touch costs a suit cell, then you get a safe moment. Move off that ghost: it cannot touch you again until you have. Only the crew (gold and blue) can hurt you.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Alien snails', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
@@ -325,8 +327,13 @@ function handleEvents(events) {
     else if (e === 'bubble') { sound.power(); say('SHIELD', '#9fe6ff'); }
     else if (e === 'heal') { sound.heal(); say('REPAIR', PAL.warn); burst(sx(run.x), sy(PY), '#ff8a96', 10); }
     else if (e.startsWith('power:')) { const k = e.slice(6); sound.power(); say(POWER_NAME[k].toUpperCase(), tierColor(k)); burst(sx(run.x), sy(PY), tierColor(k), 14); }
-    else if (e === 'join') { sound.join(); say('THE CREW FINDS YOU', PAL.crew, -52); }
-    else if (e === 'leave') { say('the crew drifts away', PAL.muted, -52); }
+    else if (e === 'join') { if (crewHere(run, run.pt).length) { sound.join(); say(run.crewArmed ? 'THE CREW FINDS YOU' : 'THE CREW IS WATCHING', PAL.crew, -52); } }
+    else if (e === 'leave') {
+      if (crewHere(run, run.pt - 1).length) say('the crew drifts away', PAL.muted, -52);
+      // announce what comes next, so a nest or a tight patch never arrives unannounced
+      const ended = run.track.windows.filter((w) => w.end <= run.pt).at(-1);
+      if (ended) say(ended.after === 'tough' ? 'TIGHT WRECKAGE AHEAD' : 'ALIEN NEST AHEAD', ended.after === 'tough' ? PAL.danger : PAL.alien, -84);
+    }
     else if (e === 'fire') sound.fire();
     else if (e === 'boom') { sound.boom(); shake = Math.max(shake, 0.35); }
   }
@@ -446,9 +453,10 @@ function drawGame(dt) {
     }
     if (pw === 'exorcise') { ctx.save(); ctx.strokeStyle = `rgba(255,255,255,${0.25 + 0.2 * Math.sin(t * 8)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(run.x), sy(PY), PR * scale * (2.4 + 0.4 * Math.sin(t * 6)), 0, TAU); ctx.stroke(); ctx.restore(); }
     if (pw === 'gold' && !reduced) { ctx.save(); ctx.fillStyle = PAL.captain; for (let i = 0; i < 4; i++) { const a = t * 3 + i * 1.6; ctx.globalAlpha = 0.8; ctx.fillRect(sx(run.x) + Math.cos(a) * 22 - 1.5, sy(PY) + Math.sin(a * 1.3) * 16 - 1.5, 3, 3); } ctx.restore(); }
+    if (pw === 'shrink') { ctx.save(); ctx.strokeStyle = 'rgba(160,240,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(sx(run.x), sy(PY), PR * scale * 1.9, 0, TAU); ctx.stroke(); ctx.restore(); } // easy to find while small
     drawBot(ctx, sx(run.x), sy(PY), PR * scale, {
       t, vx, power: pw, bubble: run.bubble, blink: run.shield > 0 || run.invuln > 0, scared: run.shield > 0, dead,
-      scale: pw === 'shrink' ? 0.6 : 1,
+      scale: pw === 'shrink' ? SHRINK_MULT : 1,
     });
     ctx.globalAlpha = 1;
   } else if (state === 'ready' || state === 'boot') {
@@ -480,11 +488,17 @@ function drawGame(dt) {
 // What is after you right now, so there is always something to read on screen.
 function threatLabel(r) {
   const ph = r.track.phaseAtTick(r.pt);
-  if (ph.kind === 'early') return 'aliens in the wreckage';
+  if (ph.kind === 'early') return 'aliens ahead';
   if (ph.kind === 'patch') return ph.patch === 'tough' ? 'tight wreckage' : 'alien nest';
-  if (!r.ghosts.length) return 'the crew is quiet';
-  const g = r.ghosts.map((_, i) => ghostPhase(r.track, r.ghosts.length, i, r.pt));
-  return g.some((x) => x.visible && !x.armed) ? 'the crew is waking' : 'the crew is after you';
+  const g = crewHere(r, r.pt);
+  if (!g.length) return 'the crew is quiet';
+  if (!r.crewArmed) return 'the crew is watching';
+  return g.some((x) => !x.armed) ? 'the crew is waking' : 'the crew is after you';
+}
+
+// The crew members actually out here at schedule time pt (visiting, and their run reached this far).
+function crewHere(r, pt) {
+  return r.ghosts.map((g, i) => ({ g, ...ghostPhase(r.track, r.ghosts.length, i, pt) })).filter((x) => x.visible && ghostX(x.g, pt) !== null);
 }
 
 // ---------- main loop ----------

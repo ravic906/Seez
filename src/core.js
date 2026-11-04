@@ -38,6 +38,9 @@ export const SHIELD_TICKS = 150;    // safe for 2.5 s after any hit (as long as 
 export const SHATTER_TICKS = 150;   // a ghost that hit you cannot hit again for 2.5 s
 export const GHOST_REARM_DIST = 0.1; // ...and not until you have moved this far from it,
 export const GHOST_REARM_MAX = 360;  // or 6 s have passed (so hugging your own ghost never makes you immune)
+// Until your best run on a board scores this much (about 45 s for a casual player), the crew only watch:
+// they visit and fly your old route, but cannot hurt you. Beginners get to learn the wreckage first.
+export const GHOST_ARM_SCORE = 700;
 
 export const FR = 0.04;             // a friend ghost's pickup radius (generous)
 export const NITRO_MULT = 1.7;      // sideways speed while Nitro lasts; points double too
@@ -77,7 +80,7 @@ export const NITRO_TICKS = POWERS.nitro.ticks; // 4 s
 // Snails sit on the solid part of a bar and, from bar SNAIL_FROM on, throw something at you.
 // They shake and glow for TELEGRAPH_DIST of falling before they fire, and fire when their bar is
 // FIRE_DIST above your row. A shot costs a heart, exactly like touching a ghost.
-export const SNAIL_FROM = 4;
+export const SNAIL_FROM = 6;
 export const FIRE_DIST = 0.8;
 export const TELEGRAPH_DIST = 0.55; // about 0.46 s of warning at top speed
 export const WEAPONS = {
@@ -116,7 +119,7 @@ export function mulberry32(seed) {
 }
 
 // Fall speed (world units per second) as a function of distance scrolled.
-export const speedAt = (D) => Math.min(1.2, 0.6 + 0.03 * D); // starts at 0.6, tops out at 1.2 (2x) after about 23 s
+export const speedAt = (D) => Math.min(1.2, 0.6 + 0.015 * D); // starts at 0.6, tops out at 1.2 (2x) after about 46 s
 
 // The bars of one board. bar(i) is memoised and depends only on (seed, i).
 // Each bar has 1 to 3 gaps. gaps[0] is a guaranteed route (it never moves further
@@ -236,9 +239,10 @@ export function makeTrack(seed) {
       const [r1, r2, r3, r4] = [srng(), srng(), srng(), srng()]; // always four draws, so branches never shift the stream
       let s = null;
       const ph = bar(k).phase;
-      const chance = k < SNAIL_FROM ? 0 : ph.kind === 'early' ? 0.3 : ph.kind === 'ghost' ? 0.1 : ph.patch === 'snails' ? 0.7 : 0.12;
-      // While the crew are away, and before they first come, never go long without an alien.
-      const nest = k >= SNAIL_FROM && (ph.kind === 'early' || (ph.kind === 'patch' && ph.patch === 'snails')) && k - lastSnail >= 4;
+      const chance = k < SNAIL_FROM ? 0 : ph.kind === 'early' ? 0.2 : ph.kind === 'ghost' ? 0.1 : ph.patch === 'snails' ? 0.5 : 0.12;
+      // While the crew are away, and before they first come, never go long without an alien
+      // (at least every 6 bars before the first visit, every 4 in a nest).
+      const nest = k >= SNAIL_FROM && ((ph.kind === 'early' && k - lastSnail >= 6) || (ph.kind === 'patch' && ph.patch === 'snails' && k - lastSnail >= 4));
       if ((r1 < chance || nest) && k - lastSnail >= 2) {
         const b = bar(k), segs = [];
         let from = 0;
@@ -295,7 +299,9 @@ export function decodeXs(text) {
 
 export function newRun(track, ghosts = [], startX = 0.5) {
   for (const g of ghosts) alignGhost(track, g);
+  const best = ghosts.find((g) => g.kind === 'best') ?? ghosts[0];
   return {
+    crewArmed: !!best && (best.score ?? 0) >= GHOST_ARM_SCORE,
     track, ghosts, tick: 0, pt: 0, ptPrev: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
     hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0), mustLeave: ghosts.map(() => false), hitAt: ghosts.map(() => -1e9),
@@ -437,6 +443,20 @@ function fire(run, sn, y) {
   else add('bomb', aim, { mode: 'fly', fuse: BOMB_FUSE, blast: 0, hit: false });
 }
 
+// How long a landed bomb ticks: BOMB_FUSE, or longer so that it never blasts while wreckage is crossing
+// your row (it waits until that bar has passed, plus 0.1 s), so a bomb can't close the gap you need.
+function bombFuse(run, pw) {
+  const v = speedAt(run.D) * (pw === 'slowmo' ? SLOWMO_MULT : 1) * TICK; // fall per tick
+  const lo = PY - PR - BAR_T / 2, hi = PY + PR + BAR_T / 2;               // a bar is at your row between these
+  let fuse = BOMB_FUSE;
+  for (let i = run.next; i < run.next + 4; i++) {
+    const y = run.D - run.track.bar(i).d;
+    const enter = (lo - y) / v, exit = (hi - y) / v; // ticks from now
+    if (exit >= 0 && enter <= fuse + BLAST_TICKS && exit >= fuse) fuse = Math.ceil(exit) + 6;
+  }
+  return fuse;
+}
+
 function updateShots(run, events, pr, pw) {
   const kept = [];
   const ghostly = pw === 'phase' || pw === 'exorcise'; // shots pass through you
@@ -451,7 +471,7 @@ function updateShots(run, events, pr, pw) {
     } else {
       const sm = pw === 'slowmo' ? SLOWMO_MULT : 1; // Slow-mo slows the aliens' shots as well as the wreckage
       s.x += s.vx * TICK * sm; s.y += s.vy * TICK * sm;
-      if (s.kind === 'bomb' && s.y >= PY) { s.y = PY; s.vx = 0; s.vy = 0; s.mode = 'fuse'; }
+      if (s.kind === 'bomb' && s.y >= PY) { s.y = PY; s.vx = 0; s.vy = 0; s.mode = 'fuse'; s.fuse = s.fuseMax = bombFuse(run, pw); }
       else if (s.kind !== 'bomb' && !ghostly && Math.hypot(s.x - run.x, s.y - PY) < s.r + pr) {
         gone = true;
         if (hurt(run, events, 'snail')) return true;
@@ -550,7 +570,7 @@ export function ghostPhase(track, nGhosts, gi, tick) {
 }
 
 // Can ghost gi hurt you right now? Not while shattered, and not again until you have moved clear of it.
-export const ghostCanHit = (run, gi) => run.shatteredUntil[gi] <= run.tick && (!run.mustLeave[gi] || run.tick >= run.hitAt[gi] + GHOST_REARM_MAX);
+export const ghostCanHit = (run, gi) => run.crewArmed && run.shatteredUntil[gi] <= run.tick && (!run.mustLeave[gi] || run.tick >= run.hitAt[gi] + GHOST_REARM_MAX);
 
 // Is wreckage crossing your row or about to (used to hold Wide gaps and Shrink until it has passed)?
 function barNear(run) {

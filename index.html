@@ -37,7 +37,7 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
 .score { text-align: center; position: absolute; left: 50%; top: 0; transform: translateX(-50%); }
 .score strong { display: block; font: 800 54px/1 var(--f-display); letter-spacing: -.02em; font-variant-numeric: tabular-nums; transition: transform .12s ease-out; text-shadow: 0 0 18px rgb(85 230 255 / .35); }
 .score strong.bump { transform: scale(1.14); }
-.score span { display: block; font: 500 11px var(--f-mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; min-height: 1.4em; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.score span { display: block; font: 500 11px var(--f-mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; min-height: 1.4em; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hearts { display: flex; justify-content: center; gap: 5px; margin-top: 2px; }
 .hearts svg { width: 18px; height: 18px; fill: var(--warn); filter: drop-shadow(0 0 5px rgb(255 77 94 / .6)); transition: opacity .2s, transform .2s; }
 .hearts svg.lost { fill: #3a4468; opacity: .6; filter: none; transform: scale(.82); }
@@ -198,7 +198,7 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
       <ul id="guide-basics"></ul>
       <h3>Aliens</h3>
       <ul id="guide-aliens"></ul>
-      <h3>Helpers (left by friendly crew spirits)</h3>
+      <h3>Helpers: friendly ghosts carry them in a bubble. Fly into them!</h3>
       <p class="note">Better helpers turn up the further you fly. Only one timed helper works at a time.</p>
       <ul id="guide-powers"></ul>
     </div>
