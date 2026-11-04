@@ -41,12 +41,18 @@ export const GHOST_REARM_MAX = 360;  // or 6 s have passed (so hugging your own 
 // Until your best run on a board scores this much (about 45 s for a casual player), the crew only watch:
 // they visit and fly your old route, but cannot hurt you. Beginners get to learn the wreckage first.
 export const GHOST_ARM_SCORE = 700;
-// Then the crew are eased in: from GHOST_ARM_SCORE only the captain (your best run) can hurt you, and
-// only for the first EASE_ARMED_TICKS of each visit (4 s, so about 2.5 s once it has woken); the whole
-// crew from CREW_FULL_SCORE. Calibrated with the beginner model: casual players keep ~85% of their
-// first-attempt time while eased (8 s kept only ~50%: they crashed into wreckage dodging the captain).
-export const CREW_FULL_SCORE = 1500;
+// Then the crew are eased in, in steps (see crewMayHurtAt):
+//  level 1, from GHOST_ARM_SCORE: only the captain (your best run), only for the first EASE_ARMED_TICKS
+//           of its visits (4 s, about 2.5 s once it has woken);
+//  level 2, from CREW_MID_SCORE: the captain for the first MID_ARMED_TICKS (7 s) of its visits, your last
+//           flight for the first 4 s of its visits;
+//  level 3, from CREW_FULL_SCORE: the whole crew, all visit long.
+// Calibrated with the beginner model (survival as a share of the watching level, levels 1/2/3): casual
+// 77/60/45%, regular 87/62/38%. With the captain dangerous all visit, level 2 was no easier than level 3.
+export const CREW_MID_SCORE = 1500;
+export const CREW_FULL_SCORE = 2500;
 export const EASE_ARMED_TICKS = 240;
+export const MID_ARMED_TICKS = 420; // level 2: the captain is dangerous for the first 7 s of its visits
 
 export const FR = 0.04;             // a friend ghost's pickup radius (generous)
 export const NITRO_MULT = 1.7;      // sideways speed while Nitro lasts; points double too
@@ -306,14 +312,14 @@ export function decodeXs(text) {
 // How dangerous the crew are on this board, from the score of your best run there (the captain).
 export function crewLevelFor(best) {
   const s = best?.score ?? 0;
-  return s >= CREW_FULL_SCORE ? 2 : s >= GHOST_ARM_SCORE ? 1 : 0;
+  return s >= CREW_FULL_SCORE ? 3 : s >= CREW_MID_SCORE ? 2 : s >= GHOST_ARM_SCORE ? 1 : 0;
 }
 
 export function newRun(track, ghosts = [], startX = 0.5) {
   for (const g of ghosts) alignGhost(track, g);
   const best = ghosts.find((g) => g.kind === 'best') ?? ghosts[0];
   return {
-    crewLevel: crewLevelFor(best), // 0 watching, 1 captain only (eased), 2 the whole crew
+    crewLevel: crewLevelFor(best), // 0 watching, 1 and 2 eased in, 3 the whole crew
     get crewArmed() { return this.crewLevel > 0; },
     track, ghosts, tick: 0, pt: 0, ptPrev: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
@@ -584,11 +590,16 @@ export function ghostPhase(track, nGhosts, gi, tick) {
 
 // Can ghost gi hurt you right now? Not while shattered, and not again until you have moved clear of it.
 export const ghostCanHit = (run, gi) => crewMayHurt(run, gi) && run.shatteredUntil[gi] <= run.tick && (!run.mustLeave[gi] || run.tick >= run.hitAt[gi] + GHOST_REARM_MAX);
-// The crew level's part: nobody while they watch; while eased in, only the captain and only early in a visit.
+// The crew level's part, for ghost gi (0 = the captain) `into` ticks into its visit. The screen uses the
+// same rule (src/main.js), so what is announced is exactly what can hurt you.
+export function crewMayHurtAt(level, gi, into) {
+  if (level >= 3) return true;
+  if (level === 2) return into < (gi === 0 ? MID_ARMED_TICKS : EASE_ARMED_TICKS);
+  if (level === 1) return gi === 0 && into < EASE_ARMED_TICKS;
+  return false;
+}
 function crewMayHurt(run, gi) {
-  if (run.crewLevel >= 2) return true;
-  if (run.crewLevel < 1 || gi !== 0) return false;
-  return ghostPhase(run.track, run.ghosts.length, gi, run.pt).into < EASE_ARMED_TICKS;
+  return run.crewLevel > 0 && crewMayHurtAt(run.crewLevel, gi, ghostPhase(run.track, run.ghosts.length, gi, run.pt).into);
 }
 
 // Is wreckage crossing your row or about to (used to hold Wide gaps and Shrink until it has passed)?

@@ -72,7 +72,8 @@ export function recordRun(store, seed, run) {
   // Only remember the 12 most recently played boards so storage stays small (oldest play time goes first).
   const keys = Object.keys(boards);
   if (keys.length > 12) {
-    const oldest = keys.filter((k) => +k !== seed).sort((a, c) => (boards[a].played ?? 0) - (boards[c].played ?? 0));
+    // never the board just played, and never today's daily (practice boards must not wipe its runs and ghosts)
+    const oldest = keys.filter((k) => +k !== seed && +k !== dailySeed()).sort((a, c) => (boards[a].played ?? 0) - (boards[c].played ?? 0));
     for (const k of oldest.slice(0, keys.length - 12)) delete boards[k];
   }
   return { ...store, boards };

@@ -68,3 +68,12 @@ test('storage keeps the boards played most recently, whatever their numbers are'
   assert.ok(kept.includes(5) && kept.includes(600001) && kept.includes(70000), 'the newest boards stay');
   assert.ok(!kept.includes(900000) && !kept.includes(800000), 'the oldest boards go, even though their numbers are large');
 });
+
+test("practice boards never push out today's daily board (its runs and ghosts stay)", () => {
+  let st = { boards: {} };
+  const today = dailySeed();
+  st = recordRun(st, today, { s: 900, x: 'AAAA', t: 1 });
+  for (let i = 1; i <= 20; i++) st = recordRun(st, 1000 + i, { s: 10, x: 'AAAA', t: 1 + i });
+  assert.ok(st.boards[today], 'the daily board is still there');
+  assert.equal(Object.keys(st.boards).length, 12, 'storage still stays small');
+});

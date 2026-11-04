@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, barClearance, openings, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
-  GHOST_ARM_SCORE, CREW_FULL_SCORE, EASE_ARMED_TICKS, NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
+  GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, EASE_ARMED_TICKS, MID_ARMED_TICKS, crewMayHurtAt, NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
   TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_STAY_BOTH, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
@@ -845,7 +845,7 @@ test('a bomb never blasts while wreckage is crossing your row', () => {
   }
 });
 
-test('eased in: from 700 only the captain can hurt you, and only early in a visit; the whole crew from CREW_FULL_SCORE', () => {
+test('the crew are eased in: captain 4 s (700), captain 7 s + last flight 4 s (CREW_MID_SCORE), whole crew (CREW_FULL_SCORE)', () => {
   const visit = { start: 200, end: 200 + 1500, mode: 'both', after: 'snails' };
   const track = fixedTrack([{ c: 0.5, w: 1 }], null, () => null, visit);
   const hitsAt = (bestScore, standOn) => {
@@ -860,8 +860,26 @@ test('eased in: from 700 only the captain can hurt you, and only early in a visi
   assert.ok(capt.hits.length >= 1, 'the captain does hurt you early in the visit');
   assert.ok(capt.hits.every((h) => h.ghost === 'best' && h.into < EASE_ARMED_TICKS), JSON.stringify(capt.hits));
   assert.deepEqual(hitsAt(GHOST_ARM_SCORE, 0.7).hits, [], 'the last flight only watches while the crew are eased in');
+  const midCapt = hitsAt(CREW_MID_SCORE, 0.3), midLast = hitsAt(CREW_MID_SCORE, 0.7);
+  assert.equal(midCapt.level, 2);
+  assert.ok(midCapt.hits.every((h) => h.ghost === 'best' && h.into < MID_ARMED_TICKS));
+  // level 2: meet the captain 5 s into its visit (past level 1's 4 s): it hurts; meet it after 7 s: it doesn't
+  const meetAt = (into) => {
+    const run = newRun(track, [ghostFrom(0.3, 2000, 'best', CREW_MID_SCORE), ghostFrom(0.7, 2000, 'recent', CREW_MID_SCORE)], 0.5);
+    let hurt = 0;
+    for (let t = 1; t <= visit.start + into + 60; t++) if (step(run, t < visit.start + into ? 0.5 : 0.3).includes('hurt')) hurt++;
+    return hurt;
+  };
+  assert.equal(meetAt(300), 1, 'level 2: the captain still hurts 5 s into its visit');
+  assert.equal(meetAt(MID_ARMED_TICKS + 30), 0, 'and is calm after 7 s');
+  assert.ok(midLast.hits.length >= 1 && midLast.hits.every((h) => h.ghost === 'recent' && h.into < EASE_ARMED_TICKS), 'level 2: the last flight only early in its visits');
   const full = hitsAt(CREW_FULL_SCORE, 0.7);
-  assert.equal(full.level, 2);
+  assert.equal(full.level, 3);
   assert.ok(full.hits.length >= 2 && full.hits.some((h) => h.into >= EASE_ARMED_TICKS), 'the whole crew, all visit long');
+  // the same rule the screen uses
+  assert.deepEqual([0, 1, 2, 3].map((lv) => [crewMayHurtAt(lv, 0, 300), crewMayHurtAt(lv, 1, 100), crewMayHurtAt(lv, 1, 300)]),
+    [[false, false, false], [false, false, false], [true, true, false], [true, true, true]]);
+  assert.equal(crewMayHurtAt(2, 0, MID_ARMED_TICKS - 1), true);
+  assert.equal(crewMayHurtAt(2, 0, MID_ARMED_TICKS), false);
   assert.equal(hitsAt(GHOST_ARM_SCORE - 1, 0.3).hits.length, 0, 'below 700 they only watch');
 });
