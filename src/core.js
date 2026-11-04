@@ -123,6 +123,10 @@ export const speedAt = (D) => Math.min(1.2, 0.6 + 0.03 * D); // starts at 0.6, t
 // than you can slide between two bars); the extra gaps give you and your ghosts room
 // to spread out.
 const GAP_MARGIN = 0.05; // solid bar kept between neighbouring gaps
+// Tight patches: gaps a little narrower than normal (width x; about 11% less room around you late in a
+// run), with two extra gaps besides the guaranteed one and normal-size jumps between bars (shift: share
+// of what you can slide between two bars, up to cap). Gentle enough for someone new to games.
+export const TIGHT = { width: 0.92, extra: 2, shift: 0.6, cap: 0.28 };
 
 export function makeTrack(seed) {
   const rng = mulberry32(seed);
@@ -161,13 +165,13 @@ export function makeTrack(seed) {
       const d = k ? bars[k - 1].d + spacing : 0.2;
       const phase = phaseAtTick(tickAt(d + PY));
       const tough = phase.kind === 'patch' && phase.patch === 'tough'; // narrower gaps, fewer of them, bigger swings
-      const w = lerp(0.30, 0.21, Math.min(1, k / 60)) * (tough ? 0.82 : 1);
+      const w = lerp(0.30, 0.21, Math.min(1, k / 60)) * (tough ? TIGHT.width : 1);
       // Never ask for a shift you cannot make in the time between two bars.
-      const maxShift = tough ? Math.min(0.34, 0.72 * LAT * spacing / speedAt(d + PY)) : Math.min(0.28, 0.6 * LAT * spacing / speedAt(d + PY));
+      const maxShift = tough ? Math.min(TIGHT.cap, TIGHT.shift * LAT * spacing / speedAt(d + PY)) : Math.min(0.28, 0.6 * LAT * spacing / speedAt(d + PY));
       c = clamp(c + (rng() * 2 - 1) * maxShift, w / 2 + 0.03, 1 - w / 2 - 0.03);
       const gaps = [{ c, w }];
       const moreGaps = rng() < 0.5;
-      const extra = tough ? 1 : moreGaps ? 3 : 2;
+      const extra = tough ? TIGHT.extra : moreGaps ? 3 : 2;
       for (let e = 0; e < extra; e++) {
         const ew = w * (0.75 + rng() * 0.35);
         for (let tries = 0; tries < 10; tries++) {

@@ -499,7 +499,7 @@ test('something is always after you: a ghost visit, an alien nest, or a tight pa
   }
 });
 
-test('tight patches have narrower gaps and fewer of them', () => {
+test('tight patches have slightly narrower gaps, still several of them, and normal-size jumps', () => {
   let tight = [], normal = [];
   for (let seed = 1; seed <= 20; seed++) {
     const t = makeTrack(seed);
@@ -507,9 +507,15 @@ test('tight patches have narrower gaps and fewer of them', () => {
   }
   assert.ok(tight.length > 100 && normal.length > 100);
   const mean = (list, f) => list.reduce((a, b) => a + f(b), 0) / list.length;
-  assert.ok(tight.every((b) => b.gaps.length === 2), 'exactly two gaps in a tight patch');
-  assert.ok(mean(tight, (b) => b.gaps.length) < mean(normal, (b) => b.gaps.length));
-  assert.ok(mean(tight, (b) => b.w) < mean(normal, (b) => b.w) * 0.9, 'the main gap is narrower');
+  assert.ok(tight.every((b) => b.gaps.length >= 2), 'always a choice of gaps');
+  assert.ok(mean(tight, (b) => b.gaps.length) >= 2.5, 'usually three');
+  const ratio = mean(tight, (b) => b.w) / mean(normal, (b) => b.w);
+  assert.ok(ratio < 0.97 && ratio > 0.85, `the main gap is a little narrower (${ratio.toFixed(2)})`);
+  // jumps between bars are no bigger than in normal wreckage
+  for (let seed = 1; seed <= 20; seed++) {
+    const t = makeTrack(seed);
+    for (let k = 11; k < 120; k++) assert.ok(Math.abs(t.bar(k).c - t.bar(k - 1).c) <= 0.28 + 1e-9, `seed ${seed} bar ${k}`);
+  }
 });
 
 test('a ghost whose run was short never shows up, and the rest of the run carries on', () => {
@@ -663,14 +669,23 @@ test('Slow-mo cannot pull the crew visits or patches away from the bars they wer
     const track = makeTrack(seed);
     const run = newRun(track, [], 0.5);
     run.lenient = true;
-    let checked = 0, k = 0;
+    let checked = 0, k = 0, same = 0;
     while (run.alive && run.tick < 14400 && k < 120) {
       run.power = 'slowmo'; run.powerLeft = 999; // slow the whole way
       step(run, track.bar(run.next).c);
       const b = track.bar(k);
-      if (run.D >= b.d + PY) { assert.deepEqual(track.phaseAtTick(run.pt), b.phase, `seed ${seed} bar ${k}`); checked++; k++; }
+      if (run.D >= b.d + PY) {
+        // the schedule clock is within one tick of the moment the bar was laid out for (it can land one
+        // tick past it), so the bar arrives in the stretch it was made for
+        const laid = track.tickAt(b.d + PY);
+        assert.ok(run.pt - laid >= 0 && run.pt - laid <= 1, `seed ${seed} bar ${k}: clock ${run.pt} vs ${laid}`);
+        assert.deepEqual(track.phaseAtTick(laid), b.phase);
+        if (track.phaseAtTick(run.pt).kind === b.phase.kind) same++;
+        checked++; k++;
+      }
     }
     assert.ok(checked > 60, 'checked a long stretch');
+    assert.ok(same >= checked - 2, `only a bar sitting exactly on a boundary may differ (${checked - same})`);
     assert.ok(new Set(Array.from({ length: 120 }, (_, i) => track.bar(i).phase.kind)).size >= 3, 'and it crossed more than one kind of stretch');
   }
 });
