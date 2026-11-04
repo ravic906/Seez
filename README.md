@@ -49,3 +49,18 @@ Limits: the replay also plays the aliens' shots (with a few spare cells, since i
 
 ## Difficulty, measured
 A human-like bot that dodges ghosts and shots (but ignores helpers) survives a median of 44 to 51 s, and every board can be flown by following its guaranteed route for 150 s, tight patches included. Before hearts, a single ghost touch ended a run within seconds.
+
+## Android app
+
+The same game ships as an Android app built with [Capacitor](https://capacitorjs.com) (project in `android/`, app id `app.echoes.rescue`). It runs fully offline: fonts are bundled (`app/fonts`, SIL Open Font License) and nothing is fetched from the internet. The shared leaderboard is not in the app yet (personal bests and ghosts work as on the web).
+
+```
+npm install
+npm run app:build     # copies the game into android/ (adds Capacitor's runtime and local fonts)
+npm run app:debug     # android/app/build/outputs/apk/debug/app-debug.apk, to sideload
+npm run app:release   # signed .aab for Google Play, once android/keystore.properties exists
+npm run app:icons     # redraws launcher icons, splash screens and store graphics from src/art.js
+```
+
+The Android back button closes a sheet, pauses a run (on the field guide), skips the intro, or leaves the app; switching away mid-run pauses it too. Publishing steps, store text, graphics and the privacy policy are in `store/` (start with `store/PUBLISHING.md`).
+

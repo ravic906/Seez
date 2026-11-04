@@ -541,3 +541,17 @@ if (dbg) window.__echoes = {
   get state() { return state; }, get run() { return run; }, get track() { return track; }, get board() { return board; },
   sound: () => sound.state(), steer: (x) => { target = x; }, start: (x) => startRun(x), seed: () => seed, skipIntro: () => endIntro(), introAt: (t) => { introT = t; },
 };
+
+// ---------- the Android app (Capacitor) ----------
+// The back button closes a sheet, pauses a run (on the field guide), skips the intro, or leaves the app.
+// Leaving the app mid-run pauses it the same way. In a browser none of this exists and nothing happens.
+const capApp = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.registerPlugin('App') : null;
+if (capApp) {
+  capApp.addListener('backButton', () => {
+    if (sheetOpen()) closeSheets();
+    else if (state === 'playing') openGuide();
+    else if (state === 'intro') endIntro();
+    else capApp.exitApp();
+  });
+  capApp.addListener('pause', () => { if (state === 'playing') openGuide(); });
+}

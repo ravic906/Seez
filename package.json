@@ -7,6 +7,18 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "tune": "node scripts/tune.mjs",
-    "start": "node scripts/serve.mjs"
+    "start": "node scripts/serve.mjs",
+    "app:build": "node scripts/build-app.mjs && npx cap sync android",
+    "app:debug": "cd android && ./gradlew assembleDebug",
+    "app:release": "cd android && ./gradlew bundleRelease",
+    "app:icons": "node scripts/make-icons.mjs"
+  },
+  "dependencies": {
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/cli": "8.5.3"
   }
 }

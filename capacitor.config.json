@@ -1,0 +1,11 @@
+{
+  "appId": "app.echoes.rescue",
+  "appName": "Echoes",
+  "webDir": "app/www",
+  "backgroundColor": "#05060f",
+  "android": {
+    "backgroundColor": "#05060f",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  }
+}
