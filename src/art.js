@@ -1,6 +1,6 @@
 // Echoes: all the drawing. Space, wreckage, the rescue bot, the dead crew, friendly crew spirits,
 // aliens and their weapons. Everything is vector shapes on a canvas; nothing is loaded.
-import { mulberry32, POWERS } from './core.js';
+import { mulberry32, POWERS, BLAST_R } from './core.js';
 
 const TAU = Math.PI * 2;
 
@@ -442,7 +442,7 @@ export function drawShot(ctx, s, x, y, px, t, blastFrac = 1) {
   if (s.kind === 'bomb') {
     if (s.mode === 'blast') {
       const k = 1 - s.blast / 8;
-      const R = 0.13 * px * (0.5 + k * 0.7);
+      const R = BLAST_R * px * (1 + k * 0.15); // full size from the first frame: it is lethal at once
       const g = ctx.createRadialGradient(0, 0, 2, 0, 0, R);
       g.addColorStop(0, 'rgba(255,255,220,0.95)'); g.addColorStop(0.5, 'rgba(255,150,40,0.7)'); g.addColorStop(1, 'rgba(255,60,20,0)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
@@ -450,7 +450,7 @@ export function drawShot(ctx, s, x, y, px, t, blastFrac = 1) {
       if (s.mode === 'fuse') { // a pulsing blast-radius warning that closes in as the fuse burns down
         const k = s.fuse / 30;
         ctx.strokeStyle = `rgba(255,77,94,${0.35 + 0.5 * (1 - k)})`; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
-        ctx.beginPath(); ctx.arc(0, 0, 0.13 * px, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(0, 0, BLAST_R * px, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = `rgba(255,77,94,${0.06 + 0.16 * (1 - k)})`; ctx.fill();
       }
       ctx.fillStyle = '#16162a'; ctx.strokeStyle = '#8fa0e0'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill(); ctx.stroke();

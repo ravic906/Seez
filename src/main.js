@@ -1,7 +1,7 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
   TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, BLAST_R, WIDEN_MULT, POWERS, speedAt,
-  newRun, step, makeTrack, pickGhosts, ghostX, encodeXs, decodeXs,
+  newRun, step, makeTrack, pickGhosts, ghostX, ghostCanHit, encodeXs, decodeXs,
 } from './core.js';
 import {
   PAL, makeStars, drawSpace, drawGirder, drawIcon, drawBot, drawCrew, drawFriend, drawAlien, drawShot,
@@ -264,7 +264,7 @@ function guideRow(list, icon, title, text) {
 function buildGuide() {
   const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
   guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
-  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. A touch costs a suit cell, then you get a safe moment.');
+  guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Every run you fly comes back as a ghost still flying your route. They find you about 10 to 15 seconds in, stay for around 15 (less when both come), then drift away for around 15, again and again, always at times set by the board. Your best run is the captain (gold), your last flight is blue; later visits can bring both. A touch costs a suit cell, then you get a safe moment. Move off that ghost: it cannot touch you again until you have.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three. Wreckage ends the run at once; ghosts and alien shots cost a cell.');
   guideRow(aliens, guideIcon((g) => { g.translate(17, 27); g.scale(0.55, 0.55); drawAlien(g, 0, 0, { t: 1, kind: 'hammer' }); }), 'Alien snails', 'They sit on the wreckage and shake red before they fire. Shots are slower than you can slide. When the crew are away something else is always after you: a nest of aliens, or a tight patch of red-lit wreckage.');
   const shot = (kind) => guideIcon((g) => drawShot(g, { kind, r: 0.03, id: 1, mode: 'fly', blast: 0, fuse: 30 }, 17, 17, 340, 0.4));
@@ -398,7 +398,8 @@ function drawGame(dt) {
       const dt = (PY - s.y) / s.vy;
       if (dt < 0) continue;
       const lx = s.x + s.vx * dt;
-      ctx.beginPath(); ctx.arc(sx(lx), sy(PY), (s.kind === 'bomb' ? BLAST_R : s.r + PR) * scale, 0, TAU); ctx.stroke();
+      // the area your body must not touch, like the bomb's fuse ring
+      ctx.beginPath(); ctx.arc(sx(lx), sy(PY), (s.kind === 'bomb' ? BLAST_R : s.r) * scale, 0, TAU); ctx.stroke();
     }
     ctx.restore();
   }
@@ -408,20 +409,21 @@ function drawGame(dt) {
   const list = run ? run.ghosts : ghosts;
   const px = (g, n) => { const a = ghostX(g, n), b = ghostX(g, n - 1); return a === null || b === null ? 0 : (a - b) * scale * 60; };
   list.forEach((g, gi) => {
-    const gx = ghostX(g, tick);
+    const gx = ghostX(g, run ? run.pt : tick);
     if (gx === null) return;
     if (!run) return;                                  // on the start screen nobody is out here yet
     const ph = ghostPhase(track, list.length, gi, run.pt);
+    const armed = ph.armed && ghostCanHit(run, gi); // glows only when it can really hurt you
     if (!ph.visible) return;                           // this one is not visiting right now
     const shat = run && run.shatteredUntil[gi] > tick ? (run.shatteredUntil[gi] - tick) / SHATTER_TICKS : 0;
     drawCrew(ctx, sx(gx), sy(PY), PR * scale, {
-      t, kind: g.kind, armed: ph.armed, shattered: shat, vx: px(g, tick),
-      near: ph.armed && Math.abs(gx - run.x) < 0.14, fade: (pw === 'exorcise' ? 0.22 : 1) * ph.fade,
+      t, kind: g.kind, armed, shattered: shat, vx: px(g, run.pt),
+      near: armed && Math.abs(gx - run.x) < 0.14, fade: (pw === 'exorcise' ? 0.22 : 1) * ph.fade,
     });
     if (pw === 'foresight') { // where this crew member will be as the wreckage arrives
       ctx.save();
       for (let n = 8; n <= 96; n += 8) {
-        const fx = ghostX(g, tick + n);
+        const fx = ghostX(g, run.pt + n);
         if (fx === null) break;
         const y = sy(PY) - n * speedAt(D) * TICK * scale;
         ctx.globalAlpha = 0.55 * (1 - n / 110); ctx.fillStyle = g.kind === 'best' ? PAL.captain : PAL.crew;

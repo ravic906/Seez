@@ -50,7 +50,7 @@ export function playBot(track, ghosts, { seed = 1, shake = 0.012, reaction = 9, 
             px += Math.max(-LAT * TICK, Math.min(LAT * TICK, cand - px));
             for (const [gi, g] of ghosts.entries()) {
               if (!ghostPhase(run.track, ghosts.length, gi, run.pt + dt).visible) continue; // not visiting then
-              const gx = ghostX(g, run.tick + dt);
+              const gx = ghostX(g, run.pt + dt);
               if (gx !== null) clear = Math.min(clear, Math.abs(px - gx) - (PR + GR));
             }
           }

@@ -36,6 +36,8 @@ export const HEARTS = 3;
 export const REPLAY_SPARE_HEARTS = 3; // extra hearts a replay gets for ghost hits it cannot see
 export const SHIELD_TICKS = 150;    // safe for 2.5 s after any hit (as long as the ghost that hit you stays shattered)
 export const SHATTER_TICKS = 150;   // a ghost that hit you cannot hit again for 2.5 s
+export const GHOST_REARM_DIST = 0.1; // ...and not until you have moved this far from it,
+export const GHOST_REARM_MAX = 360;  // or 6 s have passed (so hugging your own ghost never makes you immune)
 
 export const FR = 0.04;             // a friend ghost's pickup radius (generous)
 export const NITRO_MULT = 1.7;      // sideways speed while Nitro lasts; points double too
@@ -77,7 +79,7 @@ export const NITRO_TICKS = POWERS.nitro.ticks; // 4 s
 // FIRE_DIST above your row. A shot costs a heart, exactly like touching a ghost.
 export const SNAIL_FROM = 4;
 export const FIRE_DIST = 0.8;
-export const TELEGRAPH_DIST = 0.4;
+export const TELEGRAPH_DIST = 0.55; // about 0.46 s of warning at top speed
 export const WEAPONS = {
   hammer: { r: 0.028, vy: 1.2,  weight: 3, from: 4 },    // straight at where you stood
   jacks:  { r: 0.02,  vy: 0.72, weight: 2, from: 24 },   // a fan of three slow spinning jacks
@@ -288,10 +290,11 @@ export function decodeXs(text) {
 // ---------- a run ----------
 
 export function newRun(track, ghosts = [], startX = 0.5) {
+  for (const g of ghosts) alignGhost(track, g);
   return {
     track, ghosts, tick: 0, pt: 0, ptPrev: 0, D: 0, x: snap(clamp(startX, PR, W - PR)), alive: true, cause: null, hitGhost: null,
     score: 0, passed: 0, grazes: 0, xs: [], next: 0, margin: Infinity,
-    hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0),
+    hearts: HEARTS, shield: 0, shatteredUntil: ghosts.map(() => 0), mustLeave: ghosts.map(() => false), hitAt: ghosts.map(() => -1e9),
     power: null, powerLeft: 0, bubble: 0, invuln: 0, phase: -1, nf: 0, friends: 0,
     ns: 0, shots: [], shotId: 0, lenient: false,
   };
@@ -345,12 +348,18 @@ export function applyMove(run, x) {
   }
 
   // Past runs. A touch costs a heart (or pops a Shield bubble), then you are safe for a moment.
+  // A ghost that hit you re-arms only once you have moved clear of it (or after GHOST_REARM_MAX).
+  for (let gi = 0; gi < run.ghosts.length; gi++) {
+    const gx = ghostX(run.ghosts[gi], run.pt);
+    if (run.mustLeave[gi] && gx !== null && Math.abs(x - gx) >= GHOST_REARM_DIST) run.mustLeave[gi] = false;
+  }
   if (run.shield === 0 && run.invuln === 0 && pw !== 'exorcise') {
     for (let gi = 0; gi < run.ghosts.length; gi++) {
       const g = run.ghosts[gi];
-      const q = g.xs[run.tick - 1];
-      if (q === undefined || run.shatteredUntil[gi] > run.tick || Math.abs(x - q / 65535) >= pr + GR || !ghostPhase(run.track, run.ghosts.length, gi, run.pt).armed) continue;
+      const gx = ghostX(g, run.pt); // ghosts follow the wreckage's clock, so Slow-mo cannot pull them off their line
+      if (gx === null || !ghostCanHit(run, gi) || Math.abs(x - gx) >= pr + GR || !ghostPhase(run.track, run.ghosts.length, gi, run.pt).armed) continue;
       run.shatteredUntil[gi] = run.tick + SHATTER_TICKS;
+      run.mustLeave[gi] = true; run.hitAt[gi] = run.tick;
       run.hitGhost = g;
       if (hurt(run, events, 'ghost')) return events;
       break;
@@ -388,7 +397,11 @@ export function applyMove(run, x) {
 
   if (run.shield > 0) run.shield--;
   if (run.invuln > 0) run.invuln--;
-  if (run.powerLeft > 0 && --run.powerLeft === 0) run.power = null;
+  if (run.powerLeft > 0) {
+    // Wide gaps and Shrink never run out while wreckage is reaching your row: they wait for it to pass.
+    const hold = run.powerLeft === 1 && (run.power === 'widen' || run.power === 'shrink') && barNear(run);
+    if (!hold && --run.powerLeft === 0) run.power = null;
+  }
   if (run.bubble > 0) run.bubble--;
   if (run.tick >= MAX_TICKS) { run.alive = false; run.cause = 'timeout'; events.push('die'); }
   return events;
@@ -493,8 +506,34 @@ export function ghostPhase(track, nGhosts, gi, tick) {
   return { visible: true, armed: into > JOIN_GRACE && left > LEAVE_GRACE, fade: clamp(Math.min(into / 40, left / 40), 0, 1) };
 }
 
-// Where a ghost is on this tick, or null once its run has ended.
+// Can ghost gi hurt you right now? Not while shattered, and not again until you have moved clear of it.
+export const ghostCanHit = (run, gi) => run.shatteredUntil[gi] <= run.tick && (!run.mustLeave[gi] || run.tick >= run.hitAt[gi] + GHOST_REARM_MAX);
+
+// Is wreckage crossing your row or about to (used to hold Wide gaps and Shrink until it has passed)?
+function barNear(run) {
+  const b = run.track.bar(run.next), y = run.D - b.d;
+  return y + BAR_T / 2 > PY - PR - 0.2 && y - BAR_T / 2 < PY + PR;
+}
+
+// A ghost's positions indexed by the wreckage clock (run.pt) instead of its own ticks, so a run that
+// used Slow-mo (or a ghost recorded with it) still lines up with the bars. Replays the ghost once with
+// the same rules a replay check uses; cached on the ghost for this track.
+export function alignGhost(track, ghost) {
+  if (!track.tickAt || !ghost.xs?.length || ghost.atTrack === track) return ghost;
+  const xs = ghost.xs, at = new Uint16Array(xs.length);
+  const r = newRun(track, [], xs[0] / 65535);
+  r.lenient = true;
+  let pt = 0;
+  for (let t = 0; t < xs.length; t++) {
+    if (r.alive) { applyMove(r, xs[t] / 65535); pt = r.pt; } else pt++; // past an early end, assume the plain clock
+    at[pt - 1] = xs[t];
+  }
+  ghost.at = at.subarray(0, pt); ghost.atTrack = track;
+  return ghost;
+}
+
+// Where a ghost is at this point of the wreckage clock, or null once its run has ended.
 export function ghostX(ghost, tick) {
-  const q = ghost.xs[tick - 1];
+  const q = (ghost.at ?? ghost.xs)[tick - 1];
   return q === undefined ? null : q / 65535;
 }

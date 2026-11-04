@@ -15,7 +15,7 @@ The first launch plays a short animated intro (the ship destroyed, the bot's esc
 - **Sound.** A soft filtered white-noise bed (with a faint low hum) plays from your first touch; the speaker button turns it and all effects off. It brightens during Nitro and muffles during Slow-mo.
 - **Boards.** The wreckage is the same every run of a board. The **Daily board** is the same for everyone each day. **New board** is a private practice board with no leaderboard (your own runs on it still come back as ghosts).
 - **The speed** starts at 0.6 and climbs to 1.2 (double) over about 23 seconds, then stays there. The crew's visits and the patches follow the wreckage, not the clock, so Slow-mo cannot shift them.
-- **Crew ghosts come and go.** The crew first find you 10 to 15 seconds in, stay for 12 to 18 seconds (8 to 12 when both come at once), then drift away for 12 to 18 seconds, and repeat, at times fixed by the board. The first visit is your best run (the captain, gold), the second your last flight (blue), and later visits can bring both. A visiting ghost fades in and has 1.5 s to wake, and can't touch you for its last 0.75 s as it leaves. A touch costs one of your **3 suit cells**, shatters that ghost for 2.5 s, and gives you 2.5 s of safety (the same time the ghost takes to re-form). Lose all three and the run ends. A ghost whose run was short never arrives.
+- **Crew ghosts come and go.** The crew first find you 10 to 15 seconds in, stay for 12 to 18 seconds (8 to 12 when both come at once), then drift away for 12 to 18 seconds, and repeat, at times fixed by the board. The first visit is your best run (the captain, gold), the second your last flight (blue), and later visits can bring both. A visiting ghost fades in and has 1.5 s to wake, and can't touch you for its last 0.75 s as it leaves. A touch costs one of your **3 suit cells**, shatters that ghost for 2.5 s, and gives you 2.5 s of safety (the same time the ghost takes to re-form). That ghost can't hit you again until you have moved clear of it (or 6 s have passed), so being caught on your own old line costs one cell, not three. Ghosts follow the wreckage, not the clock, so they stay on the line they flew even when you or they used Slow-mo. Lose all three and the run ends. A ghost whose run was short never arrives.
 - **Something is always after you.** While the crew are away, the board gives you either an **alien nest** (aliens on most bars) or a **tight patch** (narrower gaps, fewer of them, lit red). Before the first visit a few aliens keep you busy. The line under the score tells you what it is: *aliens in the wreckage*, *the crew is after you*, *alien nest*, *tight wreckage*. (If a crew member's run was too short to reach this far, that visit is quiet.)
 - **Aliens** (snails) sit on the wreckage from bar 4 on. They shake red before they fire, and every shot is slower than you can slide. **Hammer**: thrown straight at where you stood (never in a tight patch, where the gaps are too narrow to dodge it). **Jacks**: a fan of three. **Bomb**: lands, ticks half a second, then a wide blast. A shot costs a suit cell, like a ghost.
 - **Helpers.** Friendly crew spirits drift by carrying a power. Fly into one to take it. Only one timed power works at a time, and a new one replaces the old. The better ones unlock the further you fly:
@@ -25,10 +25,10 @@ The first launch plays a short animated intro (the ship destroyed, the bot's esc
 | 1 | Nitro | 4 s of faster sideways speed and double points |
 | 1 | Shield | absorbs the next hit (8 s) |
 | 1 | Slow-mo | the wreckage and the aliens' shots move at half speed for 5 s |
-| 1 | Wide gaps | gaps grow by half for 5 s |
+| 1 | Wide gaps | gaps grow by half for 5 s (never ending while wreckage is at your row) |
 | 1 | Foresight | for 8 s, shows the safe route through the next bars, where shots will land and where the crew will be |
 | 2 | Exorcise | crew ghosts and alien shots pass through you for 4 s |
-| 2 | Shrink | you get smaller for 6 s |
+| 2 | Shrink | you get smaller for 6 s (never ending while wreckage is at your row) |
 | 2 | Gold rush | triple points for 5 s |
 | 3 | Repair | +1 suit cell (5 s of safety if you are full) |
 | 3 | Phase | fly through wreckage and shots for 2 s |

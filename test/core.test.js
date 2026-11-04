@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   makeTrack, newRun, step, applyMove, pickGhosts, encodeXs, decodeXs, ghostX, gapMargin, verifyRun, speedAt,
   GRACE, GRAZE, PR, GR, FR, PY, PTS_BAR, PTS_GRAZE, MAX_GHOSTS, TICK, LAT, HEARTS, SHIELD_TICKS, SHATTER_TICKS,
-  NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GOLD_MULT,
+  NITRO_TICKS, NITRO_MULT, BUBBLE_TICKS, INVULN_TICKS, maxMove, POWERS, SLOWMO_MULT, GHOST_REARM_MAX, GHOST_REARM_DIST, alignGhost, BAR_T, GOLD_MULT,
   TIER_FROM, powerWeight, JOIN_GRACE, LEAVE_GRACE, FIRST_VISIT, VISIT_STAY, VISIT_STAY_BOTH, VISIT_AWAY, ghostPhase, MAX_TICKS, SNAIL_FROM, FIRE_DIST, WEAPONS, BOMB_FUSE, BLAST_TICKS, BLAST_R, JACK_SPREAD, weaponWeight,
 } from '../src/core.js';
 import { playBot } from '../scripts/bot.mjs';
@@ -397,16 +397,16 @@ test('skimming the edge of a gap is a graze and pays a bonus', () => {
 
 // ---------- ghosts, hearts and the shield ----------
 
-test('a ghost touch costs a heart and starts a safe moment; a ghost that hit you cannot hit again for 2.5 s', () => {
-  const g = ghostFrom(0.5, 700);
+test('a ghost touch costs a heart and starts a safe moment; standing on it, it cannot hit again for 6 s', () => {
+  const g = ghostFrom(0.5, 1200);
   const run = newRun(wide, [g], 0.5);
   const hits = [];
-  for (let t = 1; t <= 600 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hits.push(t);
+  for (let t = 1; t <= 1200 && run.alive; t++) if (step(run, 0.5).includes('hurt')) hits.push(t);
   assert.equal(hits[0], GRACE + 1, 'first touch the moment the grace period ends');
-  assert.equal(hits[1], GRACE + 1 + SHIELD_TICKS + 1, 'the same ghost can hit again only once the safe window is over');
-  assert.ok(hits[1] - hits[0] >= SHATTER_TICKS, 'and not before it has re-formed');
+  assert.equal(hits[1], hits[0] + GHOST_REARM_MAX, 'standing on it, the same ghost can hit again only after GHOST_REARM_MAX');
+  assert.ok(hits[1] - hits[0] >= SHATTER_TICKS, 'and never before it has re-formed');
   assert.equal(run.cause, 'ghost');
-  assert.equal(run.tick, GRACE + 1 + 2 * (SHIELD_TICKS + 1), 'the third touch ends the run');
+  assert.equal(run.tick, GRACE + 1 + 2 * GHOST_REARM_MAX, 'the third touch ends the run');
   assert.equal(run.hearts, 0);
   assert.equal(run.hitGhost, g);
 });
@@ -716,4 +716,60 @@ test('Slow-mo slows the aliens\' shots down along with the wreckage', () => {
   for (let t = 0; t < 10; t++) { step(normal, 0.7); step(slow, 0.7); }
   const dN = normal.shots[0].y - y0, dS = slow.shots[0].y - y0;
   assert.ok(Math.abs(dS / dN - SLOWMO_MULT) < 0.02, `shot moved ${(dS / dN).toFixed(2)} of its normal distance`);
+});
+
+test('a ghost that hit you can hit again after 2.5 s only if you moved clear of it first', () => {
+  const run = newRun(wide, [ghostFrom(0.5, 900)], 0.5);
+  const hits = [];
+  let t = 0;
+  const go = (x, n) => { for (let i = 0; i < n && run.alive; i++) { t++; if (step(run, x).includes('hurt')) hits.push(t); } };
+  while (!hits.length && t < 400) go(0.5, 1);
+  go(0.5 + GHOST_REARM_DIST + 0.05, 40); // slide clear of it...
+  go(0.5, 400);                           // ...and come back
+  assert.equal(hits[1], hits[0] + SHIELD_TICKS + 1, 'once you have left it, it hits again as soon as the safe window ends');
+});
+
+test('ghosts follow the wreckage clock: through Slow-mo they stay in the gaps they flew', () => {
+  for (const seed of [5, 21, 20261103]) {
+    const track = makeTrack(seed);
+    // the ghost: a route follower recorded on this board
+    const rec = newRun(track, [], 0.5); rec.lenient = true;
+    while (rec.alive && rec.tick < 3000) step(rec, track.bar(rec.next).c);
+    const aligned = alignGhost(track, { xs: rec.xs.slice(), kind: 'best', score: 1 });
+    const raw = { xs: rec.xs.slice() }; // the same ghost looked up by tick, as before the fix
+    // now fly the board with Slow-mo on the whole way
+    const run = newRun(track, [aligned], 0.5); run.lenient = true;
+    let k = 3, inGap = 0, rawMiss = 0;
+    while (run.alive && run.tick < 4000 && k < 60) {
+      run.power = 'slowmo'; run.powerLeft = 999;
+      step(run, track.bar(run.next).c);
+      const b = track.bar(k);
+      if (run.D >= b.d + PY) {
+        if (gapMargin(b, ghostX(aligned, run.pt)) >= -1e-6) inGap++;
+        const rx = ghostX(raw, run.tick);
+        if (rx === null || gapMargin(b, rx) < 0) rawMiss++;
+        k++;
+      }
+    }
+    assert.equal(inGap, k - 3, `seed ${seed}: the aligned ghost is in a gap at every bar`);
+    assert.ok(rawMiss > 0, `seed ${seed}: looked up by tick it would have drifted into the wreckage`);
+  }
+});
+
+test('Wide gaps and Shrink wait for the wreckage at your row to pass before they run out', () => {
+  for (const kind of ['widen', 'shrink']) {
+    const track = narrow(0.06); // too narrow for you without the power
+    const run = newRun(track, [], 0.5);
+    run.lenient = true;
+    const b = track.bar(0);
+    // time the power to run out just as the first bar reaches your row
+    let ticks = 0, D = 0;
+    while (D + speedAt(D) * TICK < b.d + PY - PR - BAR_T / 2) { D += speedAt(D) * TICK; ticks++; }
+    withPower(run, kind, ticks + 2);
+    while (run.alive && run.passed < 1 && run.tick < 400) step(run, 0.5);
+    assert.ok(run.alive, `${kind}: you survive the bar it was carrying you through`);
+    assert.equal(run.passed, 1);
+    for (let i = 0; i < 3; i++) step(run, 0.5);
+    assert.equal(run.power, null, `${kind}: and it ends once the bar has passed`);
+  }
 });
