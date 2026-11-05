@@ -11,6 +11,7 @@ npm run tune     # difficulty check with a human-like bot
 The first launch plays a short animated intro (the ship destroyed, the bot's escape) with its own score: the engine hum, alien shots and impacts, the explosions, a choir for the lost crew, the launch and a title chime. Browsers need a touch before any sound, so a "Tap for sound" prompt appears; the first tap starts the music in sync with the picture and the next one skips. "Watch intro" replays it.
 
 ## Rules
+- **Pause** with the ❚❚ button (it takes the field guide's place during a run), P or Esc; switching apps or locking the phone pauses too, and so does the Android back button. Resume counts 3-2-1 first.
 - **Steer** with your thumb. You follow it at a capped speed, so you can't teleport. Wreckage ends the run at once. Skim a gap edge for a **graze** bonus.
 - **Sound.** A soft filtered white-noise bed (with a faint low hum) plays from your first touch; the speaker button turns it and all effects off. It brightens during Nitro and muffles during Slow-mo.
 - **Boards.** The wreckage is the same every run of a board. The **Daily board** is the same for everyone each day. **New board** is a private practice board with no leaderboard (your own runs on it still come back as ghosts).

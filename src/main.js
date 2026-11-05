@@ -106,6 +106,7 @@ function setBoard(newSeed) {
 }
 
 function showReady() {
+  setRunButtons(false);
   if (isDaily(seed) && seed !== dailySeed()) { seed = dailySeed(); track = makeTrack(seed); store.seed = seed; saveStore(store); } // the day rolled over
   state = 'ready'; run = null; ghosts = ghostsNow();
   $('over-daily').hidden = isDaily(seed);
@@ -128,7 +129,47 @@ function renderLegend() {
   $('legend').innerHTML = ghosts.map((g) => `<span><i style="background:${g.kind === 'best' ? PAL.captain : PAL.crew}"></i>${g.kind === 'best' ? 'Captain' : 'Last flight'} ${g.score}</span>`).join('');
 }
 
+// ---------- pause and resume ----------
+// Paused: the run stands still and a card offers Resume, the field guide or a restart. Resume counts
+// 3-2-1 first so you are not dropped straight back into the wreckage. Switching apps, locking the
+// phone, the Android back button, P or Esc all pause.
+const RESUME_COUNT = 3, RESUME_STEP = 0.45; // seconds per count
+let paused = false, resumeAt = 0;
+function pauseRun() {
+  if (state !== 'playing' || !run?.alive || (paused && !resumeAt)) return;
+  paused = true; resumeAt = 0; releaseKeys();
+  $('pause-score').textContent = run.score;
+  $('pause-time').textContent = `${(run.tick / 60).toFixed(1)} s · ${run.hearts} suit cell${run.hearts === 1 ? '' : 's'} left`;
+  $('pause').hidden = false; $('countdown').hidden = true;
+}
+function resumeRun() {
+  if (!paused || resumeAt) return;
+  $('pause').hidden = true; resumeAt = clock + RESUME_COUNT * RESUME_STEP;
+}
+function tickPause() { // during the countdown; returns true while the run should stand still
+  if (!paused) return false;
+  if (!resumeAt) return true;
+  const left = resumeAt - clock;
+  if (left <= 0) { paused = false; resumeAt = 0; $('countdown').hidden = true; target = run.x; acc = 0; return false; }
+  $('countdown').hidden = false; $('countdown').textContent = String(Math.ceil(left / RESUME_STEP));
+  return true;
+}
+// Two buttons at the top, so a big score never runs into them: during a run, pause takes the place of
+// the field guide (which is one tap away on the pause card); otherwise the field guide is back.
+let runButtons = null;
+function setRunButtons(running) {
+  if (running === runButtons) return;
+  runButtons = running; $('pause-btn').hidden = !running; $('guide-btn').hidden = running;
+}
+function clearPause() { paused = false; resumeAt = 0; $('pause').hidden = true; $('countdown').hidden = true; }
+$('resume').addEventListener('click', resumeRun);
+$('pause-btn').addEventListener('click', () => (paused ? resumeRun() : pauseRun()));
+$('pause-guide').addEventListener('click', () => openGuide());
+$('pause-restart').addEventListener('click', () => { if (state === 'playing') { clearPause(); startRun(0.5); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseRun(); });
+
 function startRun(startX) {
+  clearPause();
   ghosts = ghostsNow();
   run = newRun(track, ghosts, startX); runGoals = [];
   missed.length = 0; lastGhost = []; widenBlend = 0; lastNf = 0; lastFriends = 0;
@@ -162,6 +203,7 @@ function renderGoals() {
 }
 
 function endRun() {
+  setRunButtons(false); clearPause();
   state = 'dying'; overAt = clock + 0.7; shake = 1; flash = { c: '255,200,120', a: 0.5 };
   const prevBest = bestScore();
   const isBest = run.score > prevBest;
@@ -232,24 +274,26 @@ const pointerX = (e) => { const r = stage.getBoundingClientRect(); return Math.m
 const sheetOpen = () => !$('sheet-board').hidden || !$('sheet-guide').hidden;
 
 stage.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('button, .sheet') || sheetOpen()) return; // a tap on a sheet (even its backdrop) never starts a run
+  if (e.target.closest('button, .sheet, .card') || sheetOpen()) return; // a tap on a sheet (even its backdrop) never starts a run
   const x = pointerX(e);
   if (state === 'intro') { introPoke(); return; }
   if (state === 'ready') startRun(x);
   else if (state === 'over' && clock >= overAt) startRun(x);
-  else if (state === 'playing') target = x;
+  else if (state === 'playing' && !paused) target = x;
   try { stage.setPointerCapture(e.pointerId); } catch { /* not all browsers allow it */ }
 });
-stage.addEventListener('pointermove', (e) => { if (state === 'playing' && e.buttons !== 0) target = pointerX(e); });
+stage.addEventListener('pointermove', (e) => { if (state === 'playing' && !paused && e.buttons !== 0) target = pointerX(e); });
 
 const keys = new Set();
-const begin = () => { if (sheetOpen()) return; if (state === 'ready') startRun(0.5); else if (state === 'over' && clock >= overAt) startRun(0.5); else if (state === 'intro') introPoke(); };
+const begin = () => { if (sheetOpen()) return; if (paused) { resumeRun(); return; } if (state === 'ready') startRun(0.5); else if (state === 'over' && clock >= overAt) startRun(0.5); else if (state === 'intro') introPoke(); };
 addEventListener('keydown', (e) => {
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (e.target.closest?.('input, textarea')) return; // typing is never a game key
+  if (paused && !(e.key === ' ' || e.key === 'Enter' || e.key === 'Escape' || k === 'p')) return; // only resume keys while paused
   if (k === 'ArrowLeft' || k === 'a') keys.add('l');
   else if (k === 'ArrowRight' || k === 'd') keys.add('r');
   else if (e.key === ' ' || e.key === 'Enter') { if (e.target.closest?.('button')) return; begin(); e.preventDefault(); return; }
-  else if (e.key === 'Escape') { closeSheets(); return; }
+  else if (e.key === 'Escape' || k === 'p') { if (sheetOpen()) closeSheets(); else if (state === 'playing') (paused ? resumeRun() : pauseRun()); return; }
   else return;
   begin();
   keyDir = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
@@ -337,7 +381,7 @@ function guideRow(list, icon, title, text) {
 }
 function buildGuide() {
   const basics = $('guide-basics'), aliens = $('guide-aliens'), powers = $('guide-powers');
-  guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus.');
+  guideRow(basics, guideIcon((g) => drawBot(g, 17, 18, 8, { t: 1 })), 'You', 'The last survivor. Slide your thumb left and right to thread the gaps. Skim a gap edge for a graze bonus. Pause any time with ❚❚ (or P).');
   guideRow(basics, guideIcon((g) => drawCrew(g, 17, 17, 8, { kind: 'best', t: 1 })), 'The crew', 'Your past runs come back as ghosts, flying your old route: your best run (gold, the captain) and your last flight (blue). They visit for a while, then drift away. A touch costs a suit cell; slide off that ghost so it cannot touch you again.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'heal', 17, 17, 9, '#ff4d5e')), 'Suit cells', 'You have three (a 4th once you are good, see below). Wreckage ends the run at once; ghosts and alien shots cost a cell.');
   guideRow(basics, guideIcon((g) => drawIcon(g, 'shield', 17, 17, 9, '#9fe6ff')), 'The better you do, the tougher it gets', 'Your best score on a board decides what the crew can do, and what your bot gets:\nunder 700: the crew only watch\n700: the captain can bite, briefly · you start with a Shield\n1,500: the captain longer, your last flight briefly · you slide faster\n2,500: the whole crew · a 4th suit cell\nThe start screen shows where you are.');
@@ -627,7 +671,7 @@ function frame(ts) {
     if (introT >= INTRO_LENGTH) endIntro();
   } else {
     if (state === 'playing') {
-      if (sheetOpen()) acc = 0; else acc += dt; // reading the guide pauses the run
+      if (tickPause() || sheetOpen()) acc = 0; else acc += dt; // paused, or reading the guide: the run stands still
       while (acc >= TICK && run.alive) {
         if (keyDir) target = Math.min(1, Math.max(0, target + keyDir * 1.6 * TICK));
         handleEvents(step(run, target));
@@ -643,6 +687,7 @@ function frame(ts) {
       if (run.power !== lastMood) { lastMood = run.power; sound.mood(run.power); }
       $('status').textContent = threatLabel(run);
       checkGoals();
+      setRunButtons(run.alive);
       if (!run.alive) endRun();
     } else if (state === 'dying' && clock >= overAt) { setChips(null); showOver(); }
     shake = Math.max(0, shake - dt * 2.2);
@@ -675,15 +720,15 @@ if (dbg) window.__echoes = {
 };
 
 // ---------- the Android app (Capacitor) ----------
-// The back button closes a sheet, pauses a run (on the field guide), skips the intro, or leaves the app.
-// Leaving the app mid-run pauses it the same way. In a browser none of this exists and nothing happens.
+// The back button closes a sheet, pauses or resumes a run, skips the intro, or leaves the app.
+// Leaving the app mid-run pauses it. In a browser none of this exists and nothing happens.
 const capApp = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.registerPlugin('App') : null;
 if (capApp) {
   capApp.addListener('backButton', () => {
     if (sheetOpen()) closeSheets();
-    else if (state === 'playing') openGuide();
+    else if (state === 'playing') (paused ? resumeRun() : pauseRun());
     else if (state === 'intro') endIntro();
     else capApp.exitApp();
   });
-  capApp.addListener('pause', () => { if (state === 'playing') openGuide(); });
+  capApp.addListener('pause', () => pauseRun());
 }

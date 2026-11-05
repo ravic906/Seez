@@ -83,6 +83,8 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
 .cta { font: 800 17px var(--f-display); color: #04101a; background: var(--accent); border: 0; border-radius: 12px; padding: 13px 16px; cursor: pointer; box-shadow: 0 0 22px rgb(85 230 255 / .35); }
 .cta:active { transform: translateY(1px); }
 .links { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.countdown { position: absolute; inset: 0; display: grid; place-items: center; font: 800 96px/1 var(--f-display); color: var(--ink); text-shadow: 0 0 26px rgb(85 230 255 / .55); pointer-events: none; }
+#pause-btn { font-size: 12px; letter-spacing: -.1em; }
 .link { background: none; border: 0; color: var(--muted); font: 500 12px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; cursor: pointer; padding: 6px 2px; text-decoration: underline; text-underline-offset: 3px; }
 .link:hover { color: var(--ink); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -152,6 +154,7 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
       <span id="status"></span>
     </div>
     <div class="tools">
+      <button class="icon" id="pause-btn" type="button" aria-label="Pause" hidden>❚❚</button>
       <button class="icon" id="guide-btn" type="button" aria-label="Field guide">?</button>
       <button class="icon" id="sound" type="button" aria-pressed="true" aria-label="Sound">♪</button>
     </div>
@@ -179,6 +182,18 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
       <button class="link" id="start-new" type="button">New board</button>
     </div>
   </section>
+
+  <section class="card" id="pause" hidden>
+    <div class="flag">Paused</div>
+    <div class="big" id="pause-score">0</div>
+    <p class="note" id="pause-time"></p>
+    <button class="cta" id="resume" type="button">Resume</button>
+    <div class="links">
+      <button class="link" id="pause-guide" type="button">Field guide</button>
+      <button class="link" id="pause-restart" type="button">Restart</button>
+    </div>
+  </section>
+  <div class="countdown" id="countdown" aria-live="polite" hidden></div>
 
   <section class="card" id="over" hidden>
     <div class="flag" id="over-flag"></div>
