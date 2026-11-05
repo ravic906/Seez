@@ -198,29 +198,32 @@ function drawScenery(ctx, w, h, seed, scroll, t) {
 
 // ---------- wreckage (the bars) ----------
 
-export function drawGirder(ctx, x0, x1, y, h, t, hot = false) {
+// plain: just the plate (no hazard caps or light), for the faint plate under an alien during Wide gaps
+export function drawGirder(ctx, x0, x1, y, h, t, hot = false, plain = false) {
   const w = x1 - x0;
   if (w < 3) return;
   ctx.save();
+  const base = ctx.globalAlpha; // every opacity below is relative to the caller's (faded plates stay faded)
   const g = ctx.createLinearGradient(0, y - h / 2, 0, y + h / 2);
   g.addColorStop(0, '#39446f'); g.addColorStop(0.5, PAL.steel); g.addColorStop(1, '#171d36');
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.roundRect(x0, y - h / 2, w, h, 3); ctx.fill();
-  ctx.fillStyle = PAL.steelHi; ctx.globalAlpha = 0.7; ctx.fillRect(x0 + 2, y - h / 2 + 1, Math.max(0, w - 4), 1.5);
-  ctx.globalAlpha = 0.35; ctx.fillStyle = '#000';
+  ctx.fillStyle = PAL.steelHi; ctx.globalAlpha = base * 0.7; ctx.fillRect(x0 + 2, y - h / 2 + 1, Math.max(0, w - 4), 1.5);
+  ctx.globalAlpha = base * 0.35; ctx.fillStyle = '#000';
   for (let x = x0 + 22; x < x1 - 6; x += 26) ctx.fillRect(x, y - h / 2 + 3, 1, h - 6); // panel seams
-  ctx.globalAlpha = 0.8; ctx.fillStyle = '#7d8fd0';
+  ctx.globalAlpha = base * 0.8; ctx.fillStyle = '#7d8fd0';
   for (let x = x0 + 9; x < x1 - 4; x += 26) { ctx.beginPath(); ctx.arc(x, y, 1.1, 0, TAU); ctx.fill(); } // rivets
+  if (plain) { ctx.restore(); return; }
   // hazard stripes where the plate was torn off, and a warning light
   const cap = Math.min(14, w / 3);
-  ctx.globalAlpha = 0.9; ctx.save(); ctx.beginPath(); ctx.rect(x0, y - h / 2, cap, h); ctx.rect(x1 - cap, y - h / 2, cap, h); ctx.clip();
+  ctx.globalAlpha = base * 0.9; ctx.save(); ctx.beginPath(); ctx.rect(x0, y - h / 2, cap, h); ctx.rect(x1 - cap, y - h / 2, cap, h); ctx.clip();
   ctx.fillStyle = hot ? '#ff5a4d' : PAL.amber; ctx.fillRect(x0 - 2, y - h / 2, w + 4, h);
   ctx.fillStyle = PAL.hazard;
   for (let k = -h; k < w + h; k += 8) { ctx.beginPath(); ctx.moveTo(x0 + k, y + h / 2); ctx.lineTo(x0 + k + 4, y + h / 2); ctx.lineTo(x0 + k + 4 + h, y - h / 2); ctx.lineTo(x0 + k + h, y - h / 2); ctx.fill(); }
   ctx.restore();
   if (w > 50) {
     const on = Math.sin(t * 5 + x0) > 0.2;
-    ctx.globalAlpha = on ? 1 : 0.25; ctx.fillStyle = PAL.danger;
+    ctx.globalAlpha = base * (on ? 1 : 0.25); ctx.fillStyle = PAL.danger;
     ctx.beginPath(); ctx.arc(x0 + w / 2, y, 2, 0, TAU); ctx.fill();
   }
   ctx.restore();
@@ -228,12 +231,12 @@ export function drawGirder(ctx, x0, x1, y, h, t, hot = false) {
 
 // ---------- small icons (powers, hearts) ----------
 
-export function drawIcon(ctx, kind, cx, cy, s, color = '#fff') {
+export function drawIcon(ctx, kind, cx, cy, s, color = '#fff') { const base = ctx.globalAlpha; // opacities below are relative to the caller's (so a fade works)
   ctx.save(); ctx.translate(cx, cy); ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.4, s * 0.16); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   const arrow = (dir) => { ctx.beginPath(); ctx.moveTo(dir * s * 0.1, 0); ctx.lineTo(dir * s * 0.85, 0); ctx.moveTo(dir * s * 0.55, -s * 0.28); ctx.lineTo(dir * s * 0.85, 0); ctx.lineTo(dir * s * 0.55, s * 0.28); ctx.stroke(); };
   switch (kind) {
     case 'nitro': ctx.beginPath(); ctx.moveTo(s * 0.2, -s); ctx.lineTo(-s * 0.55, s * 0.12); ctx.lineTo(-s * 0.02, s * 0.12); ctx.lineTo(-s * 0.25, s); ctx.lineTo(s * 0.6, -s * 0.18); ctx.lineTo(s * 0.05, -s * 0.18); ctx.closePath(); ctx.fill(); break;
-    case 'shield': ctx.beginPath(); ctx.arc(0, 0, s * 0.85, 0, TAU); ctx.stroke(); ctx.globalAlpha = 0.35; ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(-s * 0.28, -s * 0.3, s * 0.3, Math.PI * 1.05, Math.PI * 1.7); ctx.stroke(); break;
+    case 'shield': ctx.beginPath(); ctx.arc(0, 0, s * 0.85, 0, TAU); ctx.stroke(); ctx.globalAlpha = base * (0.35); ctx.fill(); ctx.globalAlpha = base * (1); ctx.beginPath(); ctx.arc(-s * 0.28, -s * 0.3, s * 0.3, Math.PI * 1.05, Math.PI * 1.7); ctx.stroke(); break;
     case 'slowmo': ctx.beginPath(); ctx.arc(0, 0, s * 0.85, 0, TAU); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, -s * 0.5); ctx.lineTo(0, 0); ctx.lineTo(s * 0.4, s * 0.25); ctx.stroke(); break;
     case 'exorcise': ctx.beginPath(); ctx.arc(0, 0, s * 0.35, 0, TAU); ctx.fill(); for (let i = 0; i < 8; i++) { const a = i * TAU / 8; ctx.beginPath(); ctx.moveTo(Math.cos(a) * s * 0.55, Math.sin(a) * s * 0.55); ctx.lineTo(Math.cos(a) * s * 0.95, Math.sin(a) * s * 0.95); ctx.stroke(); } break;
     case 'widen': ctx.save(); ctx.translate(-s * 0.05, 0); arrow(-1); ctx.restore(); ctx.save(); ctx.translate(s * 0.05, 0); arrow(1); ctx.restore(); break;
@@ -296,9 +299,10 @@ export function drawBot(ctx, x, y, r, o = {}) {
   const wink = Math.floor(t * 0.9) % 5 === 0 && (t * 0.9) % 1 < 0.1;
   ctx.fillStyle = dead ? PAL.danger : PAL.led; ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2;
   for (const ex of [-R * 0.3, R * 0.3]) {
-    if (dead) { ctx.beginPath(); ctx.moveTo(ex - 3 + look, -R * 0.3); ctx.lineTo(ex + 3 + look, -R * 0.08); ctx.moveTo(ex + 3 + look, -R * 0.3); ctx.lineTo(ex - 3 + look, -R * 0.08); ctx.stroke(); }
-    else if (wink) ctx.fillRect(ex - 3 + look, -R * 0.2, 6, 1.6);
-    else { ctx.beginPath(); ctx.ellipse(ex + look, -R * 0.2, scared ? 4.2 : 3, scared ? 5 : 4, 0, 0, TAU); ctx.fill(); }
+    const e = scale; // the eyes shrink with the bot (Shrink), so they stay inside the visor
+    if (dead) { ctx.beginPath(); ctx.moveTo(ex - 3 * e + look, -R * 0.3); ctx.lineTo(ex + 3 * e + look, -R * 0.08); ctx.moveTo(ex + 3 * e + look, -R * 0.3); ctx.lineTo(ex - 3 * e + look, -R * 0.08); ctx.stroke(); }
+    else if (wink) ctx.fillRect(ex - 3 * e + look, -R * 0.2, 6 * e, 1.6);
+    else { ctx.beginPath(); ctx.ellipse(ex + look, -R * 0.2, (scared ? 4.2 : 3) * e, (scared ? 5 : 4) * e, 0, 0, TAU); ctx.fill(); }
   }
   // shield bubble
   if (bubble > 0) {
@@ -352,7 +356,7 @@ export function drawCrew(ctx, x, y, r, o = {}) {
 
 // ---------- friendly crew spirit: carries a power ----------
 
-export function drawFriend(ctx, x, y, r, kind, t = 0) {
+export function drawFriend(ctx, x, y, r, kind, t = 0) { const base = ctx.globalAlpha; // opacities below are relative to the caller's (so a fade works)
   const R = r * 1.25;
   const tc = tierColor(kind);
   ctx.save(); ctx.translate(x, y + Math.sin(t * 2.8 + x * 3) * r * 0.2);
@@ -361,7 +365,7 @@ export function drawFriend(ctx, x, y, r, kind, t = 0) {
   g.addColorStop(0, tc + '88'); g.addColorStop(1, tc + '00');
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 2.4, 0, TAU); ctx.fill();
   // ghostly crewmate body, smiling (faint: the bubble it carries is what to look at)
-  ctx.globalAlpha = 0.6; ctx.fillStyle = '#d9fff2';
+  ctx.globalAlpha = base * (0.6); ctx.fillStyle = '#d9fff2';
   ctx.beginPath(); ctx.moveTo(-R * 0.8, 0); ctx.lineTo(-R * 0.8, R * 1.0);
   for (let i = 0; i <= 3; i++) { const px = -R * 0.8 + (R * 1.6 * i) / 3; ctx.quadraticCurveTo(px - R * 0.22, R * (1.4 + 0.18 * Math.sin(t * 6 + i * 2)), px, R * 1.0); }
   ctx.lineTo(R * 0.8, 0); ctx.arc(0, 0, R * 0.8, 0, Math.PI, true); ctx.fill();
@@ -369,15 +373,15 @@ export function drawFriend(ctx, x, y, r, kind, t = 0) {
   ctx.strokeStyle = PAL.friend; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, R * 0.02, R * 0.26, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke(); // smile
   ctx.fillStyle = PAL.friend; ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.14, R * 0.08, 0, TAU); ctx.arc(R * 0.2, -R * 0.14, R * 0.08, 0, TAU); ctx.fill();
   // halo
-  ctx.globalAlpha = 0.95; ctx.strokeStyle = PAL.captain; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, -R * 0.95, R * 0.5, R * 0.14, 0, 0, TAU); ctx.stroke();
+  ctx.globalAlpha = base * (0.95); ctx.strokeStyle = PAL.captain; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, -R * 0.95, R * 0.5, R * 0.14, 0, 0, TAU); ctx.stroke();
   // the capsule it is offering
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = base * (1);
   const cy = -R * 2.0 + Math.sin(t * 4) * 2;
   ctx.fillStyle = 'rgba(8,14,40,0.9)'; ctx.strokeStyle = tc; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(0, cy, R * 1.0, 0, TAU); ctx.fill(); ctx.stroke();
   // a pulsing ring says 'collect me', unlike anything the crew or the aliens do
-  ctx.globalAlpha = 0.5 + 0.4 * Math.sin(t * 5); ctx.beginPath(); ctx.arc(0, cy, R * (1.25 + 0.12 * Math.sin(t * 5)), 0, TAU); ctx.stroke();
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = base * (0.5 + 0.4 * Math.sin(t * 5)); ctx.beginPath(); ctx.arc(0, cy, R * (1.25 + 0.12 * Math.sin(t * 5)), 0, TAU); ctx.stroke();
+  ctx.globalAlpha = base * (1);
   drawIcon(ctx, kind, 0, cy, R * 0.6, tc);
   ctx.restore();
 }
@@ -446,6 +450,7 @@ export function drawShot(ctx, s, x, y, px, t, blastFrac = 1) {
     if (s.mode === 'blast') {
       const k = 1 - s.blast / 8;
       const R = BLAST_R * px * (1 + k * 0.15); // full size from the first frame: it is lethal at once
+      ctx.globalAlpha *= 1 - 0.85 * k;         // and it fades as it ends, instead of vanishing at full brightness
       const g = ctx.createRadialGradient(0, 0, 2, 0, 0, R);
       g.addColorStop(0, 'rgba(255,255,220,0.95)'); g.addColorStop(0.5, 'rgba(255,150,40,0.7)'); g.addColorStop(1, 'rgba(255,60,20,0)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();

@@ -1,6 +1,6 @@
 // Echoes: the game screen, controls and menus. The rules are in core.js, the drawing in art.js and intro.js.
 import {
-  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, maxHearts, BLAST_R, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, JOIN_GRACE, POWERS, speedAt,
+  TICK, PY, PR, BAR_T, ghostPhase, FIRE_DIST, TELEGRAPH_DIST, SHATTER_TICKS, BUBBLE_TICKS, HEARTS, maxHearts, BLAST_R, BLAST_TICKS, WIDEN_MULT, SHRINK_MULT, GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE, JOIN_GRACE, POWERS, speedAt,
   newRun, step, makeTrack, pickGhosts, verifyRun, ghostX, ghostCanHit, openings, crewLevelFor, crewMayHurtAt, encodeXs, decodeXs,
 } from './core.js';
 import {
@@ -33,6 +33,18 @@ let target = 0.5, keyDir = 0;
 let acc = 0, last = 0, clock = 0, introT = 0, introGuard = 0;
 let overAt = 0, shake = 0, bump = 0, flash = { c: '255,77,94', a: 0 };
 const particles = [], floaters = [];
+// drawing-only state: Wide gaps cross-fade, helpers you missed fading out, ghosts whose run just ended
+const WIDEN_FADE = 0.2, MISSED_FADE = 0.5, GHOST_FADE = 0.5;
+const ALIEN_FOOT_L = 26 / 400, ALIEN_FOOT_R = 30.5 / 400; // the alien sprite's foot, in world widths (art.js drawAlien)
+let widenBlend = 0, lastNf = 0, lastFriends = 0;
+const missed = [];
+let lastGhost = [];
+// The stretch of plate (between normal gaps) that an alien at x was placed on (core.js snail()).
+function snailPlate(b, x) {
+  let from = 0;
+  for (const g of b.gaps) { const a = g.c - g.w / 2; if (x <= a) return [from, a]; from = g.c + g.w / 2; }
+  return [from, 1];
+}
 const stars = makeStars(11, 150);
 const sound = makeSound(() => store.sound !== false);
 let board = null, boardScope = 'today', runToken = 0, lastMood = null, introAudio = false;
@@ -119,6 +131,7 @@ function renderLegend() {
 function startRun(startX) {
   ghosts = ghostsNow();
   run = newRun(track, ghosts, startX); runGoals = [];
+  missed.length = 0; lastGhost = []; widenBlend = 0; lastNf = 0; lastFriends = 0;
   target = run.x; acc = 0; state = 'playing'; runToken++;
   $('start').hidden = true; $('over').hidden = true;
   $('score').textContent = '0';
@@ -400,7 +413,10 @@ function handleEvents(events) {
       if (ended) say(ended.after === 'tough' ? 'TIGHT WRECKAGE AHEAD' : 'ALIEN NEST AHEAD', ended.after === 'tough' ? PAL.danger : PAL.alien, -84);
     }
     else if (e === 'fire') sound.fire();
-    else if (e === 'boom') { sound.boom(); shake = Math.max(shake, 0.35); }
+    else if (e === 'boom') {
+      sound.boom(); shake = Math.max(shake, 0.35);
+      for (const s of run.shots) if (s.kind === 'bomb' && s.mode === 'blast' && s.blast === BLAST_TICKS) burst(sx(s.x), sy(PY), '#ffb060', 18);
+    }
   }
 }
 
@@ -416,35 +432,51 @@ function drawGame(dt) {
   const pw = run?.power ?? null;
   drawSpace(ctx, cssW, cssH, stars, D * scale + t * 6, t, seed);
 
-  // wreckage plates, with a gap list that Wide gaps stretches
-  const widen = pw === 'widen' ? WIDEN_MULT : 1;
+  // wreckage plates, with a gap list that Wide gaps stretches. When Wide gaps starts or ends the plates
+  // fade over WIDEN_FADE seconds instead of switching in one frame.
+  widenBlend = Math.max(0, Math.min(1, widenBlend + (pw === 'widen' ? 1 : -1) * dt / WIDEN_FADE));
   const k = scale / 400;
+  const platesOf = (b, mult) => { // the solid stretches, exactly as the rules see them with this widening
+    const out = []; let from = 0;
+    for (const [a0, z0] of openings(b, mult)) { const a = Math.max(0, a0), z = Math.min(1, z0); if (a > from) out.push([from, a]); from = Math.max(from, z); }
+    if (from < 1) out.push([from, 1]);
+    return out;
+  };
   const first = run ? Math.max(0, run.next - 2) : 0;
   for (let i = first; run && i < first + 18; i++) { // no wreckage on the start screen
     const b = track.bar(i);
     const yb = D - b.d, y = sy(yb);
     if (y < -60) break;
     if (y > cssH + 60) continue;
-    let from = 0;
     const h = BAR_T * scale;
-    for (const [a0, z0] of openings(b, widen)) { // exactly the plates the rules treat as solid
-      const a = Math.max(0, a0), z = Math.min(1, z0);
-      if (a > from) drawGirder(ctx, sx(from), sx(a), y, h, t, b.tough);
-      from = Math.max(from, z);
-    }
-    if (from < 1) drawGirder(ctx, sx(from), sx(1), y, h, t, b.tough);
+    const wide = widenBlend > 0 ? platesOf(b, WIDEN_MULT) : null;
+    if (widenBlend < 1) { ctx.save(); ctx.globalAlpha = 1 - widenBlend; for (const [a, z] of platesOf(b, 1)) drawGirder(ctx, sx(a), sx(z), y, h, t, b.tough); ctx.restore(); }
+    if (wide) for (const [a, z] of wide) drawGirder(ctx, sx(a), sx(z), y, h, t, b.tough);
     const sn = track.snail(i);
     if (sn) {
+      // the plate the alien was placed on (normal gaps), and its footprint kept on it
+      const [sa, sz] = snailPlate(b, sn.x);
+      const fit = Math.min(1, (sz - sa) / (ALIEN_FOOT_L + ALIEN_FOOT_R));
+      const ax = Math.max(sa + ALIEN_FOOT_L * fit, Math.min(sz - ALIEN_FOOT_R * fit, sn.x));
+      // Wide gaps can open the stretch under it: show that plate faintly (no hazard caps), so it never floats
+      if (wide && !wide.some(([a, z]) => a <= sa + 1e-9 && z >= sz - 1e-9)) {
+        ctx.save(); ctx.globalAlpha = 0.35 * widenBlend; drawGirder(ctx, sx(sa), sx(sz), y, h, t, b.tough, true); ctx.restore();
+      }
       const fireY = PY - FIRE_DIST;
       const tele = yb < fireY ? Math.max(0, Math.min(1, (yb - (fireY - TELEGRAPH_DIST)) / TELEGRAPH_DIST)) : 0;
       const recoil = yb >= fireY && yb < fireY + 0.15 ? 1 - (yb - fireY) / 0.15 : 0;
-      ctx.save(); ctx.translate(sx(sn.x), y - h / 2); ctx.scale(k, k);
+      ctx.save(); ctx.translate(sx(ax), y - h / 2); ctx.scale(k * fit, k * fit);
       drawAlien(ctx, 0, 0, { t, kind: sn.kind, tele, recoil, look: run ? Math.max(-1, Math.min(1, (run.x - sn.x) * 3)) : 0 });
       ctx.restore();
     }
   }
 
-  // friendly crew spirits carrying helpers
+  // friendly crew spirits carrying helpers (missed ones drift on and fade instead of vanishing)
+  for (let i = missed.length - 1; i >= 0; i--) {
+    const m = missed[i]; m.life -= dt;
+    if (m.life <= 0 || !run) { missed.splice(i, 1); continue; }
+    ctx.save(); ctx.globalAlpha = m.life / MISSED_FADE; drawFriend(ctx, sx(m.f.x), sy(D - m.f.d), PR * scale, m.f.kind, t); ctx.restore();
+  }
   if (run) for (let j = run.nf; j < run.nf + 3; j++) {
     const f = track.friend(j), y = sy(D - f.d);
     if (y < -70) break;
@@ -453,7 +485,10 @@ function drawGame(dt) {
   }
 
   // alien shots
-  if (run) for (const s of run.shots) drawShot(ctx, s, sx(s.x), sy(s.y), scale, t);
+  if (run) for (const s of run.shots) { // shots that missed fade out instead of vanishing (they are dropped at PY + 0.4)
+    ctx.save(); if (s.kind !== 'bomb') ctx.globalAlpha = Math.max(0, Math.min(1, (PY + 0.4 - s.y) / 0.12));
+    drawShot(ctx, s, sx(s.x), sy(s.y), scale, t); ctx.restore();
+  }
 
   // Foresight: the safe route through the next bars, and where each shot is going to land
   if (run && pw === 'foresight' && state !== 'over') {
@@ -481,12 +516,17 @@ function drawGame(dt) {
   const list = run ? run.ghosts : ghosts;
   const px = (g, n) => { const a = ghostX(g, n), b = ghostX(g, n - 1); return a === null || b === null ? 0 : (a - b) * scale * 60; };
   list.forEach((g, gi) => {
-    const gx = ghostX(g, run ? run.pt : tick);
-    if (gx === null) return;
     if (!run) return;                                  // on the start screen nobody is out here yet
+    const gx = ghostX(g, run.pt);
+    if (gx === null) { // its run ended: fade out where it was last seen, instead of vanishing
+      const lg = lastGhost[gi];
+      if (lg && clock - lg.t < GHOST_FADE) drawCrew(ctx, sx(lg.x), sy(PY), PR * scale, { t, kind: g.kind, armed: false, shattered: 0, vx: 0, near: false, fade: lg.fade * (1 - (clock - lg.t) / GHOST_FADE) });
+      return;
+    }
     const ph = ghostPhase(track, list.length, gi, run.pt);
     const armed = ph.armed && ghostCanHit(run, gi) && run.shield === 0 && run.invuln === 0 && pw !== 'exorcise'; // glows only when it can really hurt you
-    if (!ph.visible) return;                           // this one is not visiting right now
+    if (!ph.visible) { lastGhost[gi] = null; return; } // this one is not visiting right now
+    lastGhost[gi] = { x: gx, t: clock, fade: (pw === 'exorcise' ? 0.22 : 1) * ph.fade };
     const shat = run && run.shatteredUntil[gi] > tick ? (run.shatteredUntil[gi] - tick) / SHATTER_TICKS : 0;
     drawCrew(ctx, sx(gx), sy(PY), PR * scale, {
       t, kind: g.kind, armed, shattered: shat, vx: px(g, run.pt),
@@ -496,7 +536,7 @@ function drawGame(dt) {
       ctx.save();
       for (let n = 8; n <= 96; n += 8) {
         const fx = ghostX(g, run.pt + n);
-        if (fx === null) break;
+        if (fx === null || !ghostPhase(track, list.length, gi, run.pt + n).visible) break; // only while it is visiting
         const y = sy(PY) - n * speedAt(D) * TICK * scale;
         ctx.globalAlpha = 0.55 * (1 - n / 110); ctx.fillStyle = g.kind === 'best' ? PAL.captain : PAL.crew;
         ctx.beginPath(); ctx.arc(sx(fx), y, 3, 0, TAU); ctx.fill();
@@ -542,7 +582,11 @@ function drawGame(dt) {
     const f = floaters[i];
     f.life -= dt; if (f.life <= 0) { floaters.splice(i, 1); continue; }
     f.y -= 34 * dt; ctx.globalAlpha = Math.min(1, f.life * 2); ctx.fillStyle = f.color;
-    ctx.fillText(f.text, f.x, f.y);
+    // long text shrinks to fit the screen, and is kept inside it
+    let w = ctx.measureText(f.text).width;
+    if (w > cssW - 16) { ctx.font = `600 ${Math.max(9, (13 * (cssW - 16)) / w)}px "DM Mono", monospace`; w = ctx.measureText(f.text).width; }
+    ctx.fillText(f.text, Math.max(8 + w / 2, Math.min(cssW - 8 - w / 2, f.x)), f.y);
+    ctx.font = '600 13px "DM Mono", monospace';
   }
   ctx.globalAlpha = 1;
   if (pw === 'slowmo') { ctx.fillStyle = 'rgba(90,140,255,0.10)'; ctx.fillRect(-20, -20, cssW + 40, cssH + 40); }
@@ -560,6 +604,7 @@ function threatLabel(r) {
   const may = (x) => crewMayHurtAt(r.crewLevel, x.i, x.into); // the level rule (not a passing shatter)
   const hunting = g.filter((x) => x.armed && may(x));
   if (!hunting.length) return g.some((x) => !x.armed && x.into <= JOIN_GRACE && may(x)) ? 'the crew is waking' : 'the crew is watching';
+  if (r.shield > 0 || r.invuln > 0 || r.power === 'exorcise') return "you're safe for now"; // a safe window, Repair's safety, Exorcise
   return hunting.every((x) => x.i === 0) ? 'the captain is after you' : 'the crew is after you';
 }
 
@@ -587,6 +632,11 @@ function frame(ts) {
         if (keyDir) target = Math.min(1, Math.max(0, target + keyDir * 1.6 * TICK));
         handleEvents(step(run, target));
         acc -= TICK;
+      }
+      if (run.nf > lastNf) { // helpers that went past: fade the ones you did not catch
+        const caught = run.friends - lastFriends;
+        if (caught === 0) for (let j = lastNf; j < run.nf; j++) missed.push({ f: track.friend(j), life: MISSED_FADE });
+        lastNf = run.nf; lastFriends = run.friends;
       }
       $('score').textContent = run.score;
       setHearts(run.hearts, maxHearts(run)); setChips(run);
