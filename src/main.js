@@ -12,6 +12,7 @@ import { loadStore, saveStore, dailySeed, boardLabel, runsFor, recordRun } from 
 import { isDaily } from './board.js';
 import { connect, createBoard } from './leaderboard.js';
 import { randomHandle } from './names.js';
+import { GOALS, newlyDone, nextGoal, doneCount } from './goals.js';
 import { makeSound } from './sound.js';
 
 const $ = (id) => document.getElementById(id);
@@ -102,6 +103,7 @@ function showReady() {
   const lvl = crewLevelFor({ score: bestScore() }), next = [GHOST_ARM_SCORE, CREW_MID_SCORE, CREW_FULL_SCORE][lvl];
   $('start-hint').textContent = n === 0 ? 'Touch anywhere to start.'
     : `The crew will find you 10 to 15 seconds in. On this board ${CREW_TEXT[lvl]}${next ? ` (until you score ${next})` : ''}.${lvl ? ` Your bot: ${UPGRADE_TEXT[lvl]}.` : ''} Touch anywhere to start.`;
+  $('start-goal').textContent = goalLine();
   const best = bestScore();
   $('board').textContent = `${boardLabel(seed)}${best ? ` · best ${best}` : ''}`;
   $('score').textContent = '0'; $('status').textContent = '';
@@ -116,7 +118,7 @@ function renderLegend() {
 
 function startRun(startX) {
   ghosts = ghostsNow();
-  run = newRun(track, ghosts, startX);
+  run = newRun(track, ghosts, startX); runGoals = [];
   target = run.x; acc = 0; state = 'playing'; runToken++;
   $('start').hidden = true; $('over').hidden = true;
   $('score').textContent = '0';
@@ -125,6 +127,26 @@ function startRun(startX) {
 }
 
 const WHY = { ghost: 'The crew caught up with you.', snail: 'The aliens got you.', bar: 'You hit the wreckage.', timeout: 'Four minutes in the wreckage. Remarkable.' };
+
+// ---------- goals (milestones; the run itself never ends) ----------
+let runGoals = [];
+function checkGoals() {
+  const got = newlyDone(run, store.goals);
+  if (!got.length) return;
+  store = { ...store, goals: { ...(store.goals ?? {}), ...Object.fromEntries(got.map((g) => [g.id, Date.now()])) } };
+  saveStore(store);
+  for (const g of got) {
+    runGoals.push(g);
+    const showing = floaters.filter((f) => f.text.startsWith('GOAL ✓')).length; // stack above goal banners still on screen
+    say(`GOAL ✓ ${g.text}`, PAL.led, -116 - 22 * showing);
+  }
+  sound.power();
+}
+const goalLine = () => { const n = nextGoal(store.goals); return n ? `Next goal: ${n.text} (${doneCount(store.goals)} of ${GOALS.length} done)` : `All ${GOALS.length} goals done. Remarkable.`; };
+function renderGoals() {
+  const ul = $('guide-goals'); ul.replaceChildren();
+  for (const g of GOALS) { const li = document.createElement('li'); li.textContent = g.text; li.classList.toggle('done', !!store.goals?.[g.id]); ul.append(li); }
+}
 
 function endRun() {
   state = 'dying'; overAt = clock + 0.7; shake = 1; flash = { c: '255,200,120', a: 0.5 };
@@ -144,6 +166,8 @@ function endRun() {
   const before = crewLevelFor({ score: prevBest }), after = crewLevelFor({ score });
   if (after > before) $('over-why').textContent += ` From now on, ${CREW_TEXT[after]} on this board, and your bot earns ${UPGRADE_NEW.slice(before + 1, after + 1).join(' and ')}.`;
   $('over-rank').hidden = true;
+  $('over-goals').textContent = (runGoals.length ? `Goals ticked: ${runGoals.map((g) => g.text).join(' · ')}\n` : '') + goalLine();
+  $('over-goals').hidden = false;
   $('board').textContent = `${boardLabel(seed)} · best ${Math.max(prevBest, score)}`;
   const toPost = board && score > 0 ? bestToPost() : null;
   if (toPost) postAndRank(toPost, runToken);
@@ -314,7 +338,7 @@ function buildGuide() {
       `${POWER_NAME[kind]}${POWERS[kind].tier === 3 ? ' (rare)' : ''}`, POWER_HELP[kind]);
   }
 }
-function openGuide() { $('sheet-guide').hidden = false; }
+function openGuide() { renderGoals(); $('sheet-guide').hidden = false; }
 $('guide-btn').addEventListener('click', openGuide);
 $('start-guide').addEventListener('click', openGuide);
 
@@ -568,6 +592,7 @@ function frame(ts) {
       setHearts(run.hearts, maxHearts(run)); setChips(run);
       if (run.power !== lastMood) { lastMood = run.power; sound.mood(run.power); }
       $('status').textContent = threatLabel(run);
+      checkGoals();
       if (!run.alive) endRun();
     } else if (state === 'dying' && clock >= overAt) { setChips(null); showOver(); }
     shake = Math.max(0, shake - dt * 2.2);

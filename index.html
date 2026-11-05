@@ -107,7 +107,13 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
 .guide li { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; font-size: 14px; }
 .guide li canvas { width: 34px; height: 34px; }
 .guide li b { display: block; font-weight: 600; }
-.guide li span { color: var(--muted); font-size: 13px; white-space: pre-line; } /* a line break in guide text starts a new line */
+.guide li span { color: var(--muted); font-size: 13px; white-space: pre-line; }
+.goals { list-style: none; padding: 0; margin: 4px 0 8px; display: grid; gap: 3px; font-size: 13px; color: var(--muted); }
+.goals li.done { color: var(--ink, #e8eeff); }
+.goals li::before { content: '○  '; }
+.goals li.done::before { content: '✓  '; color: #55e6ff; }
+.goal-line:empty { display: none; }
+.goal-line { white-space: pre-line; } /* a line break in guide text starts a new line */
 @media (max-height: 460px) { /* landscape phones: a smaller HUD so the narrow play column is not crowded */
   .icon { width: 32px; height: 32px; border-radius: 10px; font-size: 14px; }
   .tools { gap: 5px; }
@@ -159,6 +165,7 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
     <h1>Echoes</h1>
     <p>Your ship is gone. You are the last one alive. Slide through the wreckage. Every run you fly comes back as a crew ghost, still flying your route. Don’t touch it.</p>
     <p class="hint" id="start-hint">Touch anywhere to start.</p>
+    <p class="note goal-line" id="start-goal"></p>
     <div class="links">
       <button class="link" id="start-board" type="button" hidden>Leaderboard</button>
       <button class="link" id="start-guide" type="button">Field guide</button>
@@ -172,6 +179,7 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
     <div class="big" id="over-score">0</div>
     <div class="stats"><span><b id="over-bars">0</b> bars</span><span><b id="over-grazes">0</b> grazes</span><span><b id="over-time">0</b> s</span><span id="over-friends-s"><b id="over-friends">0</b> helpers</span></div>
     <p id="over-why"></p>
+    <p class="note goal-line" id="over-goals" hidden></p>
     <p class="note" id="over-rank" hidden></p>
     <button class="cta" id="again" type="button">Fly again</button>
     <div class="links">
@@ -195,6 +203,9 @@ canvas#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: bl
   <section class="sheet" id="sheet-guide" hidden>
     <div class="panel guide">
       <header><h2>Field guide</h2><button class="link" data-close type="button">Close</button></header>
+      <h3>Goals</h3>
+      <p class="note">The game never ends. Tick these off, run by run, on any board.</p>
+      <ul id="guide-goals" class="goals"></ul>
       <h3>The wreckage</h3>
       <ul id="guide-basics"></ul>
       <h3>Aliens</h3>

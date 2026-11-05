@@ -1,4 +1,5 @@
 // Saved boards and runs, in localStorage when it is available and in memory otherwise.
+import { sanitizeGoals } from './goals.js';
 const KEY = 'echoes.v1';
 const KEEP = 8; // latest runs kept per board, plus the best
 
@@ -12,6 +13,8 @@ export function sanitizeStore(raw) {
   if (Number.isInteger(raw.seed)) out.seed = raw.seed;
   if (typeof raw.sound === 'boolean') out.sound = raw.sound;
   if (typeof raw.introSeen === 'boolean') out.introSeen = raw.introSeen;
+  const goals = sanitizeGoals(raw.goals);
+  if (Object.keys(goals).length) out.goals = goals;
   const run = (r) => {
     if (!r || typeof r !== 'object' || !Number.isFinite(r.s) || typeof r.x !== 'string' || !r.x || r.x.length > 200000) return null;
     try { if (atob(r.x).length % 2) return null; } catch { return null; }
